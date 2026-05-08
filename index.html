@@ -1,0 +1,3965 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Activity Doctor - ตารางแพทย์</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+  body { font-family: 'Sarabun', sans-serif; }
+  .schedule-table { border-collapse: collapse; }
+  .schedule-table th, .schedule-table td { border: 1px solid #d1d5db; }
+  .sticky-col    { position: sticky; left: 0; z-index: 5; }
+  .sticky-hdr    { position: sticky; top: 0; z-index: 15; }
+  .sticky-corner { position: sticky; left: 0; top: 0; z-index: 20; }
+  .doctor-chip { display:inline-block; padding:1px 7px; border-radius:9999px; font-size:11px; font-weight:600; cursor:pointer; white-space:nowrap; }
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:50; display:flex; align-items:center; justify-content:center; }
+  .scrollable-xy { overflow:auto; max-height:calc(100vh - 220px); }
+  .scrollable-x  { overflow-x:auto; }
+  input[type=checkbox] { accent-color:#6366f1; }
+  .tab-btn { padding:8px 16px; border-bottom:3px solid transparent; font-weight:600; cursor:pointer; transition:all .2s; color:#4b5563; white-space:nowrap; font-size:13px; }
+  .tab-btn.active { border-bottom-color:#6366f1; color:#6366f1; }
+  .tab-btn:hover:not(.active){ border-bottom-color:#c7d2fe; color:#818cf8; }
+  /* วันเสาร์/อาทิตย์และวันหยุดนักขัตฤกษ์ สีเดียวกัน */
+  .row-offday   td { background:#fca5a5 !important; }
+  .row-offday   td.sticky-col { background:#f87171 !important; }
+  .row-workday  td { background:#ffffff; }
+  .row-workday  td.sticky-col { background:#f9fafb; }
+  select.th-sel { border:1px solid #d1d5db; border-radius:8px; padding:5px 8px; font-size:13px; font-family:'Sarabun',sans-serif; color:#1f2937; background:white; }
+  select.th-sel:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 2px #c7d2fe; }
+  input.th-inp  { border:1px solid #d1d5db; border-radius:8px; padding:5px 8px; font-size:13px; font-family:'Sarabun',sans-serif; color:#1f2937; background:white; }
+  input.th-inp:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 2px #c7d2fe; }
+  textarea.th-ta { border:1px solid #d1d5db; border-radius:8px; padding:8px; font-size:12px; font-family:'Sarabun',sans-serif; color:#1f2937; background:white; width:100%; resize:vertical; }
+  textarea.th-ta:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 2px #c7d2fe; }
+  .oncall-btn { border-radius:8px; padding:3px 6px; font-size:11px; font-weight:700; cursor:pointer; border:2px solid transparent; transition:all .15s; }
+  .oncall-none { background:#f3f4f6; color:#6b7280; border-color:#e5e7eb; }
+  .oncall-ward { background:#ccfbf1; color:#0f766e; border-color:#14b8a6; }
+  .oncall-er   { background:#fef3c7; color:#b45309; border-color:#f59e0b; }
+  @media print {
+    body * { visibility:hidden; }
+    #printArea, #printArea * { visibility:visible; }
+    #printArea { position:fixed; top:0; left:0; width:100%; }
+  }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Header -->
+<div class="bg-indigo-700 text-white px-5 py-3 shadow-lg">
+  <div class="flex items-center justify-between flex-wrap gap-3">
+    <div class="flex items-center gap-3">
+      <div class="bg-white/20 rounded-xl p-2">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      </div>
+      <div><h1 class="text-lg font-bold">Activity Doctor</h1><p class="text-indigo-200 text-xs">ระบบจัดตารางแพทย์อัตโนมัติ</p></div>
+    </div>
+    <div class="flex items-center gap-2 flex-wrap">
+      <div class="flex items-center gap-1 bg-white rounded-lg px-2 py-1 shadow-sm">
+        <span class="text-gray-500 text-xs font-semibold">เดือน</span>
+        <select id="selMonth" class="bg-transparent border-none text-gray-800 text-sm font-bold focus:outline-none cursor-pointer">
+          <option value="1">มกราคม</option><option value="2">กุมภาพันธ์</option><option value="3">มีนาคม</option><option value="4">เมษายน</option>
+          <option value="5">พฤษภาคม</option><option value="6">มิถุนายน</option><option value="7">กรกฎาคม</option><option value="8">สิงหาคม</option>
+          <option value="9">กันยายน</option><option value="10">ตุลาคม</option><option value="11">พฤศจิกายน</option><option value="12">ธันวาคม</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-1 bg-white rounded-lg px-2 py-1 shadow-sm">
+        <span class="text-gray-500 text-xs font-semibold">พ.ศ.</span>
+        <select id="selYear" class="bg-transparent border-none text-gray-800 text-sm font-bold focus:outline-none cursor-pointer">
+          <option value="2024">2567</option><option value="2025">2568</option><option value="2026" selected>2569</option><option value="2027">2570</option><option value="2028">2571</option>
+        </select>
+      </div>
+      <button onclick="generateSchedule()" class="bg-emerald-500 hover:bg-emerald-400 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow transition">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        สุ่มตาราง Auto
+      </button>
+      <button onclick="clearSchedule()" class="bg-white/20 hover:bg-white/30 text-white px-3 py-2 rounded-lg font-semibold text-sm transition border border-white/30">ล้างตาราง</button>
+      <button onclick="syncCloudNow()" id="cloudSyncBtn" class="bg-white/20 hover:bg-white/30 text-white px-3 py-2 rounded-lg font-semibold text-sm transition border border-white/30">Sync Cloud</button>
+      <span id="cloudStatus" class="text-[11px] bg-white/10 border border-white/20 rounded-lg px-2 py-1 text-indigo-100">Local</span>
+    </div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="bg-white border-b border-gray-200 px-2 flex gap-0 overflow-x-auto">
+  <button class="tab-btn active" onclick="switchTab('schedule')"    id="tab-schedule">📅 ตารางแพทย์</button>
+  <button class="tab-btn"        onclick="switchTab('doctors')"     id="tab-doctors">👨‍⚕️ จัดการแพทย์</button>
+  <button class="tab-btn"        onclick="switchTab('leaves')"      id="tab-leaves">📋 วันลา</button>
+  <button class="tab-btn"        onclick="switchTab('constraints')" id="tab-constraints">🔒 เงื่อนไขสุ่ม</button>
+  <button class="tab-btn"        onclick="switchTab('summary')"     id="tab-summary">📊 สรุปสถิติ</button>
+  <button class="tab-btn"        onclick="switchTab('holidays')"    id="tab-holidays">🗓️ วันหยุดราชการ</button>
+</div>
+
+<!-- Tab: Schedule -->
+<div id="page-schedule" class="p-3">
+  <div class="bg-white rounded-xl shadow overflow-hidden">
+    <div class="flex items-center justify-between px-4 py-2 border-b bg-gray-50 flex-wrap gap-2">
+      <div class="flex items-center gap-3 flex-wrap">
+        <h2 class="font-bold text-gray-700 text-sm" id="scheduleTitle">ตารางเดือน</h2>
+        <div class="flex gap-2 text-xs flex-wrap">
+          <span class="bg-red-300 text-red-900 px-2 py-0.5 rounded font-semibold">■ เสาร์-อาทิตย์ / วันหยุดนักขัตฤกษ์</span>
+        </div>
+      </div>
+      <button onclick="exportExcel()" id="exportBtn" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-emerald-700 transition flex items-center gap-1">📊 Export Excel</button>
+    </div>
+    <div class="scrollable-xy" id="printArea">
+      <div id="scheduleContainer" class="p-1"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Doctors -->
+<div id="page-doctors" class="p-4 hidden">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-indigo-50 flex items-center justify-between">
+        <h3 class="font-bold text-indigo-800">🎲 แพทย์สุ่มได้</h3>
+        <button onclick="openAddDoctorModal('random')" class="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-indigo-700">+ เพิ่มแพทย์</button>
+      </div>
+      <div id="randomDoctorList" class="p-4 space-y-2"></div>
+    </div>
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-emerald-50 flex items-center justify-between">
+        <h3 class="font-bold text-emerald-800">📌 แพทย์ตารางคงที่</h3>
+        <button onclick="openAddDoctorModal('fixed')" class="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded-lg font-semibold hover:bg-emerald-700">+ เพิ่มแพทย์</button>
+      </div>
+      <div id="fixedDoctorList" class="p-4 space-y-2"></div>
+    </div>
+  </div>
+  <div class="mt-4 bg-white rounded-xl shadow">
+    <div class="px-4 py-3 border-b bg-orange-50">
+      <h3 class="font-bold text-orange-800">🌙 กำหนดเวรนอกเวลา (เสาร์/อา/หยุด) — แพทย์คงที่</h3>
+      <p class="text-xs text-orange-600 mt-0.5">เลือกวันและกำหนดว่าแพทย์อยู่ WARD หรือ ER แล้วระบบจะใส่ตารางโดยอัตโนมัติ ไม่ผ่านการสุ่ม</p>
+    </div>
+    <div class="p-4">
+      <div class="flex items-center gap-3 mb-4 flex-wrap">
+        <label class="text-sm font-semibold text-gray-700">เลือกแพทย์:</label>
+        <select id="oncallDocSel" onchange="renderOncallCalendar()" class="th-sel text-sm"></select>
+        <div class="flex gap-2 text-xs ml-2">
+          <span class="oncall-none px-2 py-1">= ไม่มีเวร</span>
+          <span class="oncall-ward px-2 py-1">= WARD</span>
+          <span class="oncall-er px-2 py-1">= ER</span>
+        </div>
+      </div>
+      <div id="oncallCalendar" class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-2"></div>
+    </div>
+  </div>
+  <div class="mt-4 bg-white rounded-xl shadow p-4">
+    <h3 class="font-bold text-gray-700 mb-3">🎨 สีประจำแพทย์</h3>
+    <div id="colorLegend" class="flex flex-wrap gap-2"></div>
+  </div>
+</div>
+
+<!-- Tab: Leaves -->
+<div id="page-leaves" class="p-4 hidden">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-amber-50"><h3 class="font-bold text-amber-800">📋 เพิ่มวันลา</h3></div>
+      <div class="p-4 space-y-3">
+        <div><label class="block text-sm font-semibold text-gray-600 mb-1">แพทย์</label>
+          <select id="leaveDoctor" class="w-full th-sel"></select></div>
+        <div><label class="block text-sm font-semibold text-gray-600 mb-1">วันที่เริ่ม</label>
+          <div class="flex gap-2" id="leaveStartPicker"></div></div>
+        <button type="button" id="leaveRangeBtn" onclick="showRangePicker('leave')" class="w-full bg-amber-100 hover:bg-amber-200 text-amber-800 py-2 rounded-lg font-bold text-sm">ลาต่อเนื่อง</button>
+        <div id="leaveEndGroup" class="hidden"><label class="block text-sm font-semibold text-gray-600 mb-1">วันที่สิ้นสุด (ไม่บังคับ)</label>
+          <div class="flex gap-2" id="leaveEndPicker"></div></div>
+        <div><label class="block text-sm font-semibold text-gray-600 mb-1">ประเภท</label>
+          <select id="leaveType" class="w-full th-sel">
+            <option value="full">ลาเต็มวัน</option>
+            <option value="half_am">ลาครึ่งวัน (เช้า)</option>
+            <option value="half_pm">ลาครึ่งวัน (บ่าย)</option>
+            <option value="meeting">ลาประชุม (นับเป็นวันทำการ)</option>
+          </select></div>
+        <button onclick="addLeave()" class="w-full bg-amber-500 hover:bg-amber-600 text-white py-2 rounded-lg font-bold text-sm">+ เพิ่มรายการ</button>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-amber-50 flex items-center justify-between">
+        <h3 class="font-bold text-amber-800">📌 รายการวันลา</h3>
+        <div class="flex items-center gap-2">
+          <span id="leaveMonthBadge" class="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-semibold"></span>
+          <button onclick="exportLeaveExcel()" class="text-xs bg-emerald-600 text-white px-2 py-1 rounded-lg font-semibold hover:bg-emerald-700">📊 Export Excel</button>
+        </div>
+      </div>
+      <div id="leaveList" class="p-4 space-y-2 max-h-[500px] overflow-y-auto"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Constraints -->
+<div id="page-constraints" class="p-4 hidden">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-purple-50"><h3 class="font-bold text-purple-800">🔒 เพิ่มเงื่อนไขก่อนสุ่ม</h3></div>
+      <div class="p-4 space-y-3">
+        <div class="bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs text-purple-700 space-y-1">
+          <div>• <b>ไม่อยู่เวรนอกเวลา</b> — ไม่ถูกสุ่มเป็น ER คืน / ER 24h</div>
+          <div>• <b>ว่างเช้า</b> — ไม่ถูกสุ่มในช่วงเช้า (OPD/ER/WARD)</div>
+          <div>• <b>ว่างบ่าย</b> — ไม่ถูกสุ่มในช่วงบ่าย (OPD PM)</div>
+        </div>
+        <div><label class="block text-sm font-semibold text-gray-600 mb-1">แพทย์</label>
+          <select id="conDoctor" class="w-full th-sel"></select></div>
+        <div><label class="block text-sm font-semibold text-gray-600 mb-1">เงื่อนไข</label>
+          <select id="conType" class="w-full th-sel">
+            <option value="no_oncall">ไม่อยู่เวรนอกเวลา (16:30-8:30 / 8:30-8:30)</option>
+            <option value="no_am">ว่างเช้า (9:00-12:00)</option>
+            <option value="no_pm">ว่างบ่าย (13:30-16:00)</option>
+          </select></div>
+        <div><label class="block text-sm font-semibold text-gray-600 mb-1">วันที่เริ่ม</label>
+          <div class="flex gap-2" id="conStartPicker"></div></div>
+        <button type="button" id="conRangeBtn" onclick="showRangePicker('constraint')" class="w-full bg-purple-100 hover:bg-purple-200 text-purple-800 py-2 rounded-lg font-bold text-sm">ลาต่อเนื่อง</button>
+        <div id="conEndGroup" class="hidden"><label class="block text-sm font-semibold text-gray-600 mb-1">วันที่สิ้นสุด (ไม่บังคับ)</label><div class="flex gap-2" id="conEndPicker"></div></div>
+        <button onclick="addConstraint()" class="w-full bg-purple-500 hover:bg-purple-600 text-white py-2 rounded-lg font-bold text-sm">+ เพิ่มเงื่อนไข</button>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-purple-50 flex items-center justify-between">
+        <h3 class="font-bold text-purple-800">📌 รายการเงื่อนไข</h3>
+        <span id="conMonthBadge" class="text-xs bg-purple-200 text-purple-800 px-2 py-0.5 rounded-full font-semibold"></span>
+      </div>
+      <div id="constraintList" class="p-4 space-y-2 max-h-[500px] overflow-y-auto"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Tab: Summary -->
+<div id="page-summary" class="p-4 hidden">
+  <div class="bg-white rounded-xl shadow overflow-hidden mb-4">
+    <div class="px-4 py-3 border-b bg-purple-50 flex items-center justify-between flex-wrap gap-2">
+      <h3 class="font-bold text-purple-800">📊 สรุปสถิติรายเดือน</h3>
+      <button onclick="saveHistoryFromCurrentMonth()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg font-bold text-sm">
+        💾 บันทึกสถิติเดือนนี้ → ใช้เดือนหน้า
+      </button>
+    </div>
+    <div class="scrollable-x p-4"><div id="summaryContainer"></div></div>
+  </div>
+  <div class="bg-white rounded-xl shadow overflow-hidden">
+    <div class="px-4 py-3 border-b bg-indigo-50 flex items-center justify-between flex-wrap gap-2">
+      <h3 class="font-bold text-indigo-800">📈 สถิติสะสม (ทุกเดือนที่บันทึกไว้)</h3>
+      <button onclick="clearHistory()" class="text-xs bg-red-100 text-red-700 px-3 py-1.5 rounded-lg hover:bg-red-200 font-semibold">ล้างประวัติ</button>
+    </div>
+    <div class="scrollable-x p-4"><div id="historyContainer"></div></div>
+  </div>
+</div>
+
+<!-- Tab: Holidays -->
+<div id="page-holidays" class="p-4 hidden">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <!-- Left: Add forms -->
+    <div class="space-y-4">
+      <!-- Single Date Add -->
+      <div class="bg-white rounded-xl shadow">
+        <div class="px-4 py-3 border-b bg-red-50"><h3 class="font-bold text-red-800">➕ เพิ่มวันหยุดทีละวัน</h3></div>
+        <div class="p-4 space-y-3">
+          <div><label class="block text-sm font-semibold text-gray-600 mb-1">วันที่</label>
+            <div class="flex gap-2" id="holidayDatePicker"></div></div>
+          <div><label class="block text-sm font-semibold text-gray-600 mb-1">ชื่อวันหยุด</label>
+            <input type="text" id="holidayName" placeholder="เช่น วันสงกรานต์" class="w-full th-inp"></div>
+          <button onclick="addHoliday()" class="w-full bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg font-bold text-sm">+ เพิ่มวันหยุด</button>
+        </div>
+      </div>
+    </div>
+    <!-- Right: List -->
+    <div class="bg-white rounded-xl shadow">
+      <div class="px-4 py-3 border-b bg-red-50 flex items-center justify-between flex-wrap gap-2">
+        <h3 class="font-bold text-red-800">📅 รายการวันหยุด</h3>
+        <div class="flex gap-2 items-center">
+          <select id="holidayFilterYear" onchange="renderHolidayList()" class="th-sel text-xs py-1 px-2">
+            <option value="0">ทุกปี</option><option value="2024">2567</option><option value="2025">2568</option>
+            <option value="2026">2569</option><option value="2027">2570</option><option value="2028">2571</option>
+          </select>
+          <button onclick="clearHolidaysForYear()" class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200 font-semibold">ล้างปีที่เลือก</button>
+        </div>
+      </div>
+      <div id="holidayList" class="p-4 space-y-1 max-h-[600px] overflow-y-auto"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Doctor -->
+<div id="doctorModal" class="modal-overlay hidden">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+    <div class="px-6 py-4 border-b flex items-center justify-between">
+      <h3 class="font-bold text-gray-800 text-lg" id="doctorModalTitle">เพิ่มแพทย์</h3>
+      <button onclick="closeDoctorModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+    </div>
+    <div class="p-6 space-y-4">
+      <input type="hidden" id="editDoctorId"><input type="hidden" id="editDoctorType">
+      <div><label class="block text-sm font-semibold text-gray-600 mb-1">ชื่อแพทย์</label>
+        <input type="text" id="doctorNameInput" placeholder="ชื่อ-นามสกุล" class="w-full th-inp"></div>
+      <div><label class="block text-sm font-semibold text-gray-600 mb-1">สถานะ</label>
+        <select id="doctorStatusInput" class="w-full th-sel">
+          <option value="active">ปฏิบัติงาน (Active)</option>
+          <option value="transferred_out">ย้ายออก</option>
+          <option value="transferred_in">ย้ายเข้า (รอเริ่มงาน)</option>
+        </select></div>
+      <div id="condSection">
+        <label class="block text-sm font-semibold text-gray-600 mb-2">เงื่อนไขพิเศษ</label>
+        <label class="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="checkbox" id="cond_psychiatry"> ประจำจิตเวช วันพุธ (งดถ้าได้ WARD)
+        </label>
+      </div>
+      <div class="flex gap-3 pt-2">
+        <button onclick="saveDoctorModal()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold text-sm">💾 บันทึก</button>
+        <button onclick="closeDoctorModal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold text-sm">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Edit Cell -->
+<div id="cellModal" class="modal-overlay hidden">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+    <div class="px-6 py-4 border-b flex items-center justify-between">
+      <h3 class="font-bold text-gray-800" id="cellModalTitle">แก้ไข Slot</h3>
+      <button onclick="closeCellModal()" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+    </div>
+    <div class="p-6 space-y-3">
+      <p class="text-sm text-gray-500" id="cellModalDesc"></p>
+      <select id="cellDoctorSelect" class="w-full th-sel"><option value="">— ว่าง —</option></select>
+      <div class="flex gap-3">
+        <button onclick="saveCellModal()" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg font-bold text-sm">บันทึก</button>
+        <button onclick="closeCellModal()" class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg font-semibold text-sm">ยกเลิก</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===================== STATE =====================
+let state = {
+  year:2026, month:5,
+  doctors:[
+    {id:1,  name:'ปัถย์',    type:'random',status:'active',cond_psychiatry:true},
+    {id:2,  name:'จีรวัฒน์', type:'random',status:'active'},
+    {id:3,  name:'ณัฐพนธ์',  type:'random',status:'active'},
+    {id:4,  name:'วีรยา',    type:'random',status:'active'},
+    {id:5,  name:'สุพิชชา',  type:'random',status:'active'},
+    {id:6,  name:'จิดาภา',   type:'random',status:'active'},
+    {id:7,  name:'ศุภชลี',   type:'random',status:'active'},
+    {id:8,  name:'พศวัต',    type:'fixed', status:'active'},
+    {id:9,  name:'อิงตะวัน', type:'fixed', status:'active'},
+    {id:10, name:'ปิยารัตน์',type:'fixed', status:'active'},
+    {id:11, name:'ประเสริฐ', type:'fixed', status:'active'},
+    {id:12, name:'ทวีศักดิ์', type:'fixed', status:'active'},
+  ],
+  leaves:{},
+  schedule:{},
+  fixedOncall:{},
+  wardWeeks:{},
+  constraints:{},
+  history:{},
+  historyMonths:{},
+  generatedMonths:{},
+  holidays:{},
+};
+
+// ===================== CONSTANTS =====================
+const DC = [
+  {bg:'bg-violet-200',text:'text-violet-900'},{bg:'bg-blue-200',  text:'text-blue-900'},
+  {bg:'bg-cyan-200',  text:'text-cyan-900'}, {bg:'bg-teal-200',  text:'text-teal-900'},
+  {bg:'bg-green-200', text:'text-green-900'},{bg:'bg-lime-200',  text:'text-lime-900'},
+  {bg:'bg-yellow-200',text:'text-yellow-900'},{bg:'bg-orange-200',text:'text-orange-900'},
+  {bg:'bg-pink-200',  text:'text-pink-900'}, {bg:'bg-rose-200',  text:'text-rose-900'},
+  {bg:'bg-indigo-200',text:'text-indigo-900'},{bg:'bg-amber-200', text:'text-amber-900'},
+];
+const LEAVE_LABELS = {
+  full:'ลาเต็มวัน', half_am:'ลาครึ่งวัน(เช้า)', half_pm:'ลาครึ่งวัน(บ่าย)', meeting:'ลาประชุม'
+};
+const CON_LABELS = {
+  no_oncall:'🌙 ไม่อยู่เวรนอกเวลา', no_am:'🌅 ว่างเช้า', no_pm:'🌇 ว่างบ่าย'
+};
+const TH_MONTHS     = ['','มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'];
+const TH_MS         = ['','ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+const TH_DAYS       = ['อา','จ','อ','พ','พฤ','ศ','ส'];
+const TH_DAYS_FULL  = ['อาทิตย์','จันทร์','อังคาร','พุธ','พฤหัสบดี','ศุกร์','เสาร์'];
+const THAI_MONTH_MAP = {
+  'มกราคม':1,'กุมภาพันธ์':2,'มีนาคม':3,'เมษายน':4,'พฤษภาคม':5,'มิถุนายน':6,
+  'กรกฎาคม':7,'สิงหาคม':8,'กันยายน':9,'ตุลาคม':10,'พฤศจิกายน':11,'ธันวาคม':12
+};
+
+const SEC_COLORS = {'ในเวลา':'#e0f2fe','เช้า':'#fef9c3','บ่าย':'#ecfdf5','นอกเวลา':'#fdf4ff'};
+const WARD_PREF_NAMES=['จีรวัฒน์','ณัฐพนธ์','ปัถย์','จิดาภา','ศุภชลี','สุพิชชา','วีรยา'];
+const ALL_SLOT_DEFS = [
+  {key:'ward',           label:'WARD',          sub:'8:30-16:30',    section:'ในเวลา'},
+  {key:'er_day',         label:'ER ในเวลา',     sub:'8:30-16:30',    section:'ในเวลา'},
+  {key:'pcu_full',       label:'PCU',           sub:'9:00-16:00 อ/ศ', section:'ในเวลา'},
+  {key:'opd1_am',        label:'OPD1',          sub:'9:00-12:00',    section:'เช้า'},
+  {key:'opd2_am',        label:'OPD2',          sub:'9:00-12:00',    section:'เช้า'},
+  {key:'opd3_am',        label:'OPD3',          sub:'9:00-12:00',    section:'เช้า'},
+  {key:'ncd_am',         label:'NCD',           sub:'9:00-12:00',    section:'เช้า'},
+  {key:'clinic_am',      label:'Clinic',        sub:'9:00-12:00',    section:'เช้า'},
+  {key:'off_am',         label:'OFF',           sub:'9:00-12:00',    section:'เช้า'},
+  {key:'pcu_am',         label:'PCU',           sub:'9:00-12:00 จ/พฤ', section:'เช้า'},
+  {key:'psychiatry_am',  label:'จิตเวช',        sub:'9:00-12:00 พ',   section:'เช้า'},
+  {key:'geriatric_am',   label:'Geriatric',     sub:'9:00-12:00 ศ',   section:'เช้า'},
+  {key:'opd1_pm',        label:'OPD1',          sub:'13:30-16:00',   section:'บ่าย'},
+  {key:'opd2_pm',        label:'OPD2',          sub:'13:30-16:00',   section:'บ่าย'},
+  {key:'opd3_pm',        label:'OPD3',          sub:'13:30-16:00',   section:'บ่าย'},
+  {key:'palliative_pm',  label:'Palliative',    sub:'13:30-16:00 พฤ', section:'บ่าย'},
+  {key:'acupuncture_pm', label:'ฝังเข็ม',       sub:'13:00-16:00 จ/พ/พฤ', section:'บ่าย'},
+  {key:'dm_remission_pm',label:'DM Remission',  sub:'13:00-16:00 ศ', section:'บ่าย'},
+  {key:'telemedicine_pm',label:'Telemedicine',  sub:'13:00-16:00 จ/อ', section:'บ่าย'},
+  {key:'er_night',       label:'ER นอกเวลา',   sub:'16:30-8:00',    section:'นอกเวลา'},
+  {key:'er_24',          label:'ER วันหยุด',    sub:'8:30-8:30',     section:'นอกเวลา'},
+  {key:'ward_24',        label:'WARD',          sub:'8:30-8:30',     section:'นอกเวลา'},
+];
+
+function isSlotApplicable(key,dow,isOff){
+  if(isOff)return['er_24','ward_24'].includes(key);
+  if(['er_24','ward_24'].includes(key))return false;
+  if(key==='pcu_full')       return dow===2||dow===5;
+  if(key==='pcu_am')         return dow===1||dow===4;
+  if(key==='psychiatry_am')  return dow===3;
+  if(key==='geriatric_am')   return dow===5;
+  if(key==='palliative_pm')  return dow===4;
+  if(key==='acupuncture_pm') return[1,3,4].includes(dow);
+  if(key==='dm_remission_pm')return dow===5;
+  if(key==='telemedicine_pm')return dow===1||dow===2;
+  return true;
+}
+
+// ===================== UTILS =====================
+const fmt=(y,m,d)=>`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+const parseDate=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);};
+const isHoliday=ds=>!!state.holidays[ds];
+const isWeekend=ds=>{const d=parseDate(ds);return d.getDay()===0||d.getDay()===6;};
+const isWorkday=ds=>!isWeekend(ds)&&!isHoliday(ds);
+function getWeekKey(ds){const d=parseDate(ds);const mon=new Date(d);const dow=d.getDay()===0?6:d.getDay()-1;mon.setDate(d.getDate()-dow);return fmt(mon.getFullYear(),mon.getMonth()+1,mon.getDate());}
+function getDaysInMonth(y,m){const days=[];const tot=new Date(y,m,0).getDate();for(let d=1;d<=tot;d++)days.push(fmt(y,m,d));return days;}
+const getDoctorById=id=>state.doctors.find(d=>d.id===id)||null;
+const getDoctorByName=n=>state.doctors.find(d=>d.name===n)||null;
+function canAssignDoctorToSlot(docId,key,ds=null){
+  const doc=getDoctorById(docId);
+  if(key==='geriatric_am')return !!(doc&&doc.name==='พศวัต');
+  if(key==='acupuncture_pm')return !!(doc&&doc.name==='พศวัต');
+  if(key==='pcu_full'&&ds&&parseDate(ds).getDay()===5)return !!(doc&&(doc.name==='พศวัต'||doc.name==='อิงตะวัน'));
+  if(doc&&doc.name==='ปิยารัตน์'){
+    if(key==='clinic_am'&&ds)return parseDate(ds).getDay()===5;
+    return false;
+  }
+  if(doc&&doc.type==='fixed'&&key==='opd1_am')return false;
+  if(doc&&doc.name==='ปิยารัตน์'&&key.endsWith('_pm'))return false;
+  if(doc&&doc.name==='ทวีศักดิ์')return['clinic_am','ncd_am'].includes(key);
+  if(doc&&doc.name==='ประเสริฐ'){
+    if(key!=='clinic_am'||!ds)return false;
+    return parseDate(ds).getDay()===4;
+  }
+  return true;
+}
+function enforceDoctorSlotLimits(schedule,days){
+  let changed=false;
+  for(const ds of days){
+    const s=schedule[ds];
+    if(!s)continue;
+    for(const key of Object.keys(s)){
+      if(s[key]&&!canAssignDoctorToSlot(s[key],key,ds)){
+        s[key]=null;
+        changed=true;
+      }
+    }
+  }
+  return changed;
+}
+function enforceTawisakNcdWhenPiyaratClinic(schedule,days){
+  const tawisak=getDoctorByName('ทวีศักดิ์');
+  const piyarat=getDoctorByName('ปิยารัตน์');
+  if(!tawisak||!piyarat||tawisak.status!=='active')return false;
+  let changed=false;
+  const rdocs=getRandomDoctors();
+  for(const ds of days){
+    if(!isWorkday(ds))continue;
+    const s=schedule[ds];
+    if(!s||s.clinic_am!==piyarat.id)continue;
+    const leavingCount=rdocs.filter(d=>{const lv=getDoctorLeave(d.id,ds);return lv==='full'||lv==='meeting';}).length;
+    if(leavingCount<2)continue;
+    const lvT=getDoctorLeave(tawisak.id,ds);
+    const canWorkT=lvT!=='full'&&lvT!=='meeting'&&lvT!=='half_am'&&s.ward!==tawisak.id;
+    if(canWorkT&&s.ncd_am!==tawisak.id){
+      s.ncd_am=tawisak.id;
+      changed=true;
+    }
+  }
+  return changed;
+}
+function enforceRequiredOpd1ErNight(schedule,days){
+  const STEAL_OPD3=['opd3_am','opd3_pm'];
+  const STEAL_OPD2=['opd2_am','opd2_pm'];
+  const STEALABLE=[...STEAL_OPD3,...STEAL_OPD2];
+  const OPD1_STEALABLE=STEALABLE;
+  const protectedKeys=new Set(['ward','off_am','er_day','psychiatry_am','geriatric_am','palliative_pm',
+    'acupuncture_pm','dm_remission_pm','telemedicine_pm']);
+  const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+  const clearSteals=(s,id,keys)=>{for(const k of keys){if(s[k]===id)s[k]=null;}};
+  const nextWorkdayInDays=ds=>{
+    for(let i=days.indexOf(ds)+1;i<days.length;i++){
+      if(isWorkday(days[i]))return days[i];
+    }
+    return null;
+  };
+  const previousDateStr=ds=>{
+    const d=parseDate(ds);d.setDate(d.getDate()-1);
+    return fmt(d.getFullYear(),d.getMonth()+1,d.getDate());
+  };
+  const holidayErReplacement=(currentId,holidayDs)=>{
+    const hs=schedule[holidayDs];
+    if(!hs||hs.er_24!==currentId)return null;
+    const prevDs=previousDateStr(holidayDs);
+    const nextDs=nextDateStr(holidayDs);
+    const prevHolidayEr=!isWorkday(prevDs)?schedule[prevDs]?.er_24||state.schedule[prevDs]?.er_24||null:null;
+    const nextHolidayEr=!isWorkday(nextDs)?schedule[nextDs]?.er_24||state.schedule[nextDs]?.er_24||null:null;
+    const nextWorkday=nextWorkdayInDays(holidayDs);
+    const nextWardId=nextWorkday?state.wardWeeks[getWeekKey(nextWorkday)]:null;
+    const pool=getRandomDoctors().filter(d=>{
+      if(d.id===currentId)return false;
+      if(!canAssignDoctorToSlot(d.id,'er_24',holidayDs))return false;
+      if(hs.ward_24===d.id||prevHolidayEr===d.id||nextHolidayEr===d.id||nextWardId===d.id)return false;
+      const lv=getDoctorLeave(d.id,holidayDs);
+      if(lv==='full')return false;
+      if(hasMeetingNextDay(d.id,holidayDs))return false;
+      if(hasDoctorConstraint(d.id,holidayDs,'no_oncall'))return false;
+      return true;
+    });
+    return shuffle(pool)[0]||null;
+  };
+  const moveNextHolidayErIfNeeded=(id,ds)=>{
+    const nds=nextDateStr(ds);
+    if(isWorkday(nds)||schedule[nds]?.er_24!==id)return true;
+    const replacement=holidayErReplacement(id,nds);
+    if(!replacement)return false;
+    schedule[nds].er_24=replacement.id;
+    return true;
+  };
+  const canUse=(s,id,ds,allowedSteals,allowHolidayMove=false)=>{
+    if(!id||!canAssignDoctorToSlot(id,'opd1_am',ds))return false;
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting'||lv==='half_am')return false;
+    if(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_oncall'))return false;
+    if(hasMeetingNextDay(id,ds))return false;
+    if(s.ward===id||s.off_am===id||s.er_day===id)return false;
+    const nextWorkday=nextWorkdayInDays(ds);
+    const nextWardId=nextWorkday?state.wardWeeks[getWeekKey(nextWorkday)]:null;
+    if(nextWardId&&nextWardId!==state.wardWeeks[getWeekKey(ds)]&&id===nextWardId)return false;
+    const nds=nextDateStr(ds);
+    if(!isWorkday(nds)&&(schedule[nds]?.er_24||state.schedule[nds]?.er_24)===id&&
+      !(allowHolidayMove&&holidayErReplacement(id,nds)))return false;
+    for(const k of heldKeys(s,id)){
+      if(k==='opd1_am'||k==='er_night')continue;
+      if(protectedKeys.has(k))return false;
+      if((k==='er_day'||k==='opd1_am'||k==='er_night'))return false;
+      if(!allowedSteals.includes(k))return false;
+    }
+    return true;
+  };
+  const emergencyKeys=[...OPD1_STEALABLE];
+  const canUseEmergency=(s,id,ds,respectConstraints=true)=>{
+    if(!id||!canAssignDoctorToSlot(id,'opd1_am',ds))return false;
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting'||lv==='half_am')return false;
+    if(respectConstraints&&(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_oncall')||hasMeetingNextDay(id,ds)))return false;
+    if(s.ward===id||s.off_am===id||s.er_day===id)return false;
+    for(const k of heldKeys(s,id)){
+      if(k==='opd1_am'||k==='er_night')continue;
+      if(k==='ward'||k==='off_am'||k==='er_day')return false;
+      if((k==='opd1_am'||k==='er_night'))return false;
+      if(!emergencyKeys.includes(k))return false;
+    }
+    return true;
+  };
+  const emergencyRank=(s,id)=>{
+    const doc=getDoctorById(id);
+    const held=heldKeys(s,id).filter(k=>k!=='opd1_am'&&k!=='er_night');
+    const piyarClinicPenalty=(doc&&doc.name==='ปิยารัตน์'&&s.clinic_am===id)?3:0;
+    return held.length+piyarClinicPenalty+(doc&&doc.type==='fixed'?0:5);
+  };
+  const chooseOpd1Doctor=(s,ds)=>{
+    const randomDocs=getRandomDoctors();
+    const freeFixedDocs=getActiveDoctors().filter(d=>d.type==='fixed');
+    const tiers=[
+      {keys:[], pool:randomDocs.filter(d=>canUse(s,d.id,ds,[]))},
+      {keys:STEAL_OPD3, pool:randomDocs.filter(d=>canUse(s,d.id,ds,STEAL_OPD3))},
+      {keys:STEALABLE, pool:randomDocs.filter(d=>canUse(s,d.id,ds,STEALABLE))},
+      {keys:OPD1_STEALABLE, pool:randomDocs.filter(d=>canUse(s,d.id,ds,OPD1_STEALABLE))},
+      {keys:OPD1_STEALABLE, moveHolidayEr:true, pool:randomDocs.filter(d=>canUse(s,d.id,ds,OPD1_STEALABLE,true))},
+      {keys:[], pool:freeFixedDocs.filter(d=>canUse(s,d.id,ds,[]))},
+      {keys:emergencyKeys, emergency:true, pool:getActiveDoctors().filter(d=>canUseEmergency(s,d.id,ds,true)).sort((a,b)=>emergencyRank(s,a.id)-emergencyRank(s,b.id))},
+      {keys:emergencyKeys, emergency:true, pool:getActiveDoctors().filter(d=>canUseEmergency(s,d.id,ds,false)).sort((a,b)=>emergencyRank(s,a.id)-emergencyRank(s,b.id))}
+    ];
+    for(const tier of tiers){
+      const p=shuffle(tier.pool)[0]||null;
+      if(p)return{doc:p,keys:tier.keys};
+    }
+    return null;
+  };
+  let changed=false;
+  for(const ds of days){
+    if(!isWorkday(ds))continue;
+    const s=schedule[ds];
+    if(!s)continue;
+    const current=s.opd1_am&&s.er_night===s.opd1_am?s.opd1_am:null;
+    if(current&&canUse(s,current,ds,OPD1_STEALABLE,true)&&moveNextHolidayErIfNeeded(current,ds)){
+      clearSteals(s,current,OPD1_STEALABLE);
+      continue;
+    }
+    if(s.opd1_am||s.er_night)changed=true;
+    s.opd1_am=null;s.er_night=null;
+    const picked=chooseOpd1Doctor(s,ds);
+    if(picked){
+      if(picked.moveHolidayEr&&!moveNextHolidayErIfNeeded(picked.doc.id,ds))continue;
+      clearSteals(s,picked.doc.id,picked.keys);
+      s.opd1_am=picked.doc.id;
+      s.er_night=picked.doc.id;
+      changed=true;
+    }
+  }
+  return changed;
+}
+function enforceRequiredClinicRooms(schedule,days){
+  const defaultOptional=new Set(['opd2_am','opd3_am','opd3_pm']);
+  const conditionalOptional='opd2_pm';
+  const skipKeys=new Set(['ward','off_am','opd1_am','er_night','er_24','ward_24']);
+  const fullDayKeys=new Set(['ward','er_day','pcu_full','opd1_am','er_night']);
+  const keyPeriods=key=>{
+    if(fullDayKeys.has(key))return{am:true,pm:true};
+    return{am:key.endsWith('_am'),pm:key.endsWith('_pm')};
+  };
+  const periodsConflict=(a,b)=>(a.am&&b.am)||(a.pm&&b.pm);
+  const randomLeaveCount=ds=>getRandomDoctors().filter(d=>{
+    const lv=getDoctorLeave(d.id,ds);
+    return lv==='full'||lv==='meeting';
+  }).length;
+  const canLeaveBlank=(key,ds)=>defaultOptional.has(key)||(key===conditionalOptional&&randomLeaveCount(ds)>=3);
+  const roomKeysForDay=ds=>{
+    const d=parseDate(ds),dow=d.getDay();
+    return ALL_SLOT_DEFS
+      .filter(sd=>isSlotApplicable(sd.key,dow,false)&&!skipKeys.has(sd.key))
+      .map(sd=>sd.key);
+  };
+  const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+  const allowedStealsForDay=(ds,key)=>{
+    const keys=['opd2_am','opd3_am','opd3_pm'];
+    if(randomLeaveCount(ds)>=3)keys.push('opd2_pm');
+    return keys.filter(k=>k!==key);
+  };
+  const canUse=(s,id,ds,key,ignoreKeys=new Set())=>{
+    if(!id||!canAssignDoctorToSlot(id,key,ds))return false;
+    const doc=getDoctorById(id);
+    if(!doc||doc.status!=='active')return false;
+    const need=keyPeriods(key);
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting')return false;
+    if(need.am&&(lv==='half_am'||hasDoctorConstraint(id,ds,'no_am')))return false;
+    if(need.pm&&(lv==='half_pm'||hasDoctorConstraint(id,ds,'no_pm')))return false;
+    if(key==='er_day'&&lv)return false;
+    for(const k of heldKeys(s,id)){
+      if(k===key||ignoreKeys.has(k))continue;
+      if(periodsConflict(need,keyPeriods(k)))return false;
+    }
+    return true;
+  };
+  const chooseForSlot=(s,ds,key)=>{
+    if(key==='opd1_pm'&&s.off_am&&canUse(s,s.off_am,ds,key)){
+      return{doc:getDoctorById(s.off_am),clear:[]};
+    }
+    const pools=[getRandomDoctors(),getActiveDoctors().filter(d=>d.type==='fixed')];
+    for(const pool of pools){
+      const direct=shuffle(pool.filter(d=>canUse(s,d.id,ds,key)))[0];
+      if(direct)return{doc:direct,clear:[]};
+    }
+    const stealable=allowedStealsForDay(ds,key);
+    for(const pool of pools){
+      for(const d of shuffle(pool)){
+        const clear=stealable.filter(k=>s[k]===d.id);
+        if(!clear.length)continue;
+        if(canUse(s,d.id,ds,key,new Set(clear)))return{doc:d,clear};
+      }
+    }
+    return null;
+  };
+  let changed=false;
+  for(const ds of days){
+    if(!isWorkday(ds))continue;
+    const s=schedule[ds];
+    if(!s)continue;
+    const keys=roomKeysForDay(ds);
+    const ordered=[
+      ...keys.filter(k=>!canLeaveBlank(k,ds)),
+      ...keys.filter(k=>canLeaveBlank(k,ds))
+    ];
+    for(const key of ordered){
+      if(s[key]&&canUse(s,s[key],ds,key))continue;
+      if(s[key])changed=true;
+      s[key]=null;
+      const picked=chooseForSlot(s,ds,key);
+      if(picked){
+        for(const k of picked.clear){if(s[k]){s[k]=null;changed=true;}}
+        s[key]=picked.doc.id;
+        changed=true;
+      }
+    }
+  }
+  return changed;
+}
+function enforceRequiredOpd1Pm(schedule,days){
+  const key='opd1_pm';
+  const stealablePm=['opd3_pm','opd2_pm'];
+  const fullDayKeys=new Set(['ward','er_day','pcu_full','opd1_am','er_night']);
+  const keyPeriods=k=>{
+    if(fullDayKeys.has(k))return{am:true,pm:true};
+    return{am:k.endsWith('_am'),pm:k.endsWith('_pm')};
+  };
+  const periodsConflict=(a,b)=>(a.am&&b.am)||(a.pm&&b.pm);
+  const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+  const canUse=(s,id,ds,ignoreKeys=new Set())=>{
+    if(!id||!canAssignDoctorToSlot(id,key,ds))return false;
+    const doc=getDoctorById(id);
+    if(!doc||doc.status!=='active')return false;
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting'||lv==='half_pm')return false;
+    if(hasDoctorConstraint(id,ds,'no_pm'))return false;
+    const need={am:false,pm:true};
+    for(const k of heldKeys(s,id)){
+      if(k===key||ignoreKeys.has(k))continue;
+      if(periodsConflict(need,keyPeriods(k)))return false;
+    }
+    return true;
+  };
+  const choose=(s,ds)=>{
+    if(s.off_am&&canUse(s,s.off_am,ds)){
+      return{doc:getDoctorById(s.off_am),clear:[]};
+    }
+    const pools=[getRandomDoctors(),getActiveDoctors().filter(d=>d.type==='fixed')];
+    for(const pool of pools){
+      const direct=shuffle(pool.filter(d=>canUse(s,d.id,ds)))[0];
+      if(direct)return{doc:direct,clear:[]};
+    }
+    for(const clearKey of stealablePm){
+      for(const pool of pools){
+        for(const d of shuffle(pool)){
+          if(s[clearKey]!==d.id)continue;
+          if(canUse(s,d.id,ds,new Set([clearKey])))return{doc:d,clear:[clearKey]};
+        }
+      }
+    }
+    return null;
+  };
+  let changed=false;
+  for(const ds of days){
+    if(!isWorkday(ds))continue;
+    const s=schedule[ds];
+    if(!s)continue;
+    if(s[key]&&canUse(s,s[key],ds))continue;
+    if(s[key])changed=true;
+    s[key]=null;
+    const picked=choose(s,ds);
+    if(picked){
+      for(const k of picked.clear){if(s[k]){s[k]=null;changed=true;}}
+      s[key]=picked.doc.id;
+      changed=true;
+    }
+  }
+  return changed;
+}
+function enforceOffAfterErDuty(schedule,days){
+  const conflictKeys=['ward','er_day','pcu_full','opd1_am','er_night','opd2_am','opd3_am','ncd_am','clinic_am',
+    'pcu_am','psychiatry_am','geriatric_am'];
+  const previousSchedule=ds=>{
+    const idx=days.indexOf(ds);
+    if(idx>0)return schedule[days[idx-1]]||{};
+    const d=parseDate(ds);
+    d.setDate(d.getDate()-1);
+    return state.schedule[fmt(d.getFullYear(),d.getMonth()+1,d.getDate())]||{};
+  };
+  let changed=false;
+  for(const ds of days){
+    if(!isWorkday(ds))continue;
+    const s=schedule[ds];
+    if(!s)continue;
+    const prev=previousSchedule(ds);
+    const offId=prev.er_night||prev.er_24||null;
+    if(!offId||!getDoctorById(offId))continue;
+    if(s.off_am!==offId){s.off_am=offId;changed=true;}
+    for(const k of conflictKeys){
+      if(s[k]===offId){
+        s[k]=null;
+        changed=true;
+      }
+    }
+  }
+  return changed;
+}
+function stabilizeWorkdayHardRules(schedule,days){
+  let changed=false;
+  for(let i=0;i<8;i++){
+    let round=false;
+    round=enforceRequiredOpd1ErNight(schedule,days)||round;
+    round=enforceOffAfterErDuty(schedule,days)||round;
+    round=enforceRequiredClinicRooms(schedule,days)||round;
+    round=enforceRequiredOpd1Pm(schedule,days)||round;
+    changed=round||changed;
+    if(!round)break;
+  }
+  return changed;
+}
+function enforceRandomDoctorIntimeCoverage(schedule,days){
+  const rdocs=getRandomDoctors();
+  if(!rdocs.length)return false;
+  const rdocIds=new Set(rdocs.map(d=>d.id));
+  const coverageKeys=['opd3_pm','opd2_pm','opd1_pm','opd3_am','opd2_am','clinic_am','ncd_am','pcu_am','pcu_full','psychiatry_am'];
+  const openRoomKeys=['pcu_full','opd2_am','opd3_am','ncd_am','clinic_am','pcu_am','psychiatry_am','opd1_pm','opd2_pm','opd3_pm'];
+  const inTimeKeys=['ward','er_day','opd1_am','opd2_am','opd3_am','clinic_am','ncd_am',
+    'psychiatry_am','pcu_am','pcu_full','geriatric_am','opd1_pm','opd2_pm','opd3_pm'];
+  const fullDayKeys=new Set(['ward','er_day','pcu_full','opd1_am','er_night']);
+  const periodOf=key=>fullDayKeys.has(key)?{am:true,pm:true}:{am:key.endsWith('_am'),pm:key.endsWith('_pm')};
+  const periodsConflict=(a,b)=>(a.am&&b.am)||(a.pm&&b.pm);
+  const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+  const slotAllowedForLeaveAndConstraint=(id,ds,key)=>{
+    const need=periodOf(key);
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting')return false;
+    if(need.am&&(lv==='half_am'||hasDoctorConstraint(id,ds,'no_am')))return false;
+    if(need.pm&&(lv==='half_pm'||hasDoctorConstraint(id,ds,'no_pm')))return false;
+    return true;
+  };
+  const canUseSlot=(s,id,ds,key,ignoreKey=null)=>{
+    if(!id||!canAssignDoctorToSlot(id,key,ds)||!isSlotApplicable(key,parseDate(ds).getDay(),false))return false;
+    if(!slotAllowedForLeaveAndConstraint(id,ds,key))return false;
+    const need=periodOf(key);
+    for(const k of heldKeys(s,id)){
+      if(k===key||k===ignoreKey)continue;
+      if(periodsConflict(need,periodOf(k)))return false;
+    }
+    return true;
+  };
+  const hasRequiredDailyWork=(s,id,ds)=>{
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting')return true;
+    const keys=lv==='half_am'
+      ? inTimeKeys.filter(k=>periodOf(k).pm)
+      : lv==='half_pm'
+        ? inTimeKeys.filter(k=>periodOf(k).am)
+        : inTimeKeys;
+    return keys.some(k=>s[k]===id);
+  };
+  const missingMap=()=>{
+    const miss={};
+    rdocs.forEach(d=>{miss[d.id]=[];});
+    for(const ds of days){
+      if(!isWorkday(ds))continue;
+      const s=schedule[ds]||{};
+      for(const d of rdocs){
+        if(!hasRequiredDailyWork(s,d.id,ds))miss[d.id].push(ds);
+      }
+    }
+    return miss;
+  };
+  const fillOpenRooms=()=>{
+    let roomChanged=false;
+    const miss=missingMap();
+    for(const ds of days){
+      if(!isWorkday(ds))continue;
+      const s=schedule[ds]||(schedule[ds]={});
+      const dow=parseDate(ds).getDay();
+      for(const key of openRoomKeys){
+        if(s[key]||!isSlotApplicable(key,dow,false))continue;
+        const missingRandom=rdocs.filter(d=>(miss[d.id]||[]).includes(ds));
+        const otherRandom=rdocs.filter(d=>!(miss[d.id]||[]).includes(ds));
+        const fixed=getActiveDoctors().filter(d=>d.type==='fixed');
+        const pools=[missingRandom,otherRandom,fixed];
+        let picked=null;
+        for(const pool of pools){
+          picked=shuffle(pool.filter(d=>canUseSlot(s,d.id,ds,key)))[0]||null;
+          if(picked)break;
+        }
+        if(picked){
+          s[key]=picked.id;
+          roomChanged=true;
+        }
+      }
+    }
+    return roomChanged;
+  };
+  const donorHasOtherWork=(s,id,skipKey)=>inTimeKeys.some(k=>k!==skipKey&&s[k]===id);
+  const fillDoctorDay=(id,ds,allowReplace=false,miss=null)=>{
+    const s=schedule[ds]||(schedule[ds]={});
+    const usableKeys=coverageKeys.filter(k=>canUseSlot(s,id,ds,k));
+    for(const key of usableKeys){
+      if(!s[key]){
+        s[key]=id;
+        return true;
+      }
+    }
+    if(!allowReplace)return false;
+    for(const key of usableKeys){
+      const donor=s[key];
+      if(!rdocIds.has(donor)||donor===id)continue;
+      if(!donorHasOtherWork(s,donor,key))continue;
+      if(!canUseSlot(s,id,ds,key,key))continue;
+      s[key]=id;
+      return true;
+    }
+    return false;
+  };
+  let changed=false;
+  for(let iter=0;iter<80;iter++){
+    changed=fillOpenRooms()||changed;
+    const miss=missingMap();
+    const targets=rdocs
+      .map(d=>({id:d.id,days:miss[d.id]||[]}))
+      .filter(x=>x.days.length>0)
+      .sort((a,b)=>b.days.length-a.days.length);
+    if(!targets.length)break;
+    let moved=false;
+    for(const target of targets){
+      for(const ds of target.days){
+        if(fillDoctorDay(target.id,ds,false)){
+          changed=true;
+          moved=true;
+          break;
+        }
+      }
+      if(moved)break;
+    }
+    if(moved)continue;
+    for(const target of targets){
+      for(const ds of target.days){
+        if(fillDoctorDay(target.id,ds,true,miss)){
+          changed=true;
+          moved=true;
+          break;
+        }
+      }
+      if(moved)break;
+    }
+    if(!moved)break;
+  }
+  changed=fillOpenRooms()||changed;
+  return changed;
+}
+function enforceRandomPcuAndOpdPmBalance(schedule,days){
+  const rdocs=getRandomDoctors();
+  if(rdocs.length<2)return false;
+  const ids=rdocs.map(d=>d.id),idSet=new Set(ids);
+  const ingtawan=getDoctorByName('อิงตะวัน');
+  const fullDayKeys=new Set(['ward','er_day','pcu_full','opd1_am','er_night']);
+  const periodOf=key=>fullDayKeys.has(key)?{am:true,pm:true}:{am:key.endsWith('_am'),pm:key.endsWith('_pm')};
+  const periodsConflict=(a,b)=>(a.am&&b.am)||(a.pm&&b.pm);
+  const inTimeKeys=['ward','er_day','opd1_am','opd2_am','opd3_am','clinic_am','ncd_am',
+    'psychiatry_am','pcu_am','pcu_full','geriatric_am','opd1_pm','opd2_pm','opd3_pm'];
+  const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+  const hasOtherInTime=(s,id,skipKey)=>inTimeKeys.some(k=>k!==skipKey&&s[k]===id);
+  const hasAnyInTime=(s,id)=>inTimeKeys.some(k=>s[k]===id);
+  const canUseSlot=(s,id,ds,key,ignoreKey=null)=>{
+    if(!id||!canAssignDoctorToSlot(id,key,ds)||!isSlotApplicable(key,parseDate(ds).getDay(),false))return false;
+    const need=periodOf(key);
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting')return false;
+    if(need.am&&(lv==='half_am'||hasDoctorConstraint(id,ds,'no_am')))return false;
+    if(need.pm&&(lv==='half_pm'||hasDoctorConstraint(id,ds,'no_pm')))return false;
+    for(const k of heldKeys(s,id)){
+      if(k===key||k===ignoreKey)continue;
+      if(periodsConflict(need,periodOf(k)))return false;
+    }
+    return true;
+  };
+  const countFor=(keys,filterDs)=> {
+    const c={};ids.forEach(id=>c[id]=0);
+    for(const ds of days){
+      if(!filterDs(ds))continue;
+      const s=schedule[ds]||{};
+      for(const key of keys){
+        const id=s[key];
+        if(idSet.has(id))c[id]++;
+      }
+    }
+    return c;
+  };
+  const rebuildOpdPmBalanced=()=>{
+    const keys=['opd1_pm','opd2_pm','opd3_pm'];
+    const slots=[];
+    for(const ds of days){
+      if(!isWorkday(ds))continue;
+      for(const key of keys){
+        const cur=schedule[ds]?.[key]||null;
+        if(!cur||idSet.has(cur))slots.push({ds,key});
+      }
+    }
+    if(!slots.length)return false;
+    const original=new Map(slots.map(({ds,key})=>[`${ds}|${key}`,schedule[ds]?.[key]||null]));
+    const snapshot=slots.map(({ds})=>({ds,data:{...(schedule[ds]||{})}}));
+    const countRange=c=>{const vals=ids.map(id=>c[id]||0);return Math.max(...vals)-Math.min(...vals);};
+    let best=null,bestRange=Infinity,bestFilled=-1;
+    for(let attempt=0;attempt<120;attempt++){
+      for(const b of snapshot)Object.assign(schedule[b.ds]||(schedule[b.ds]={}),b.data);
+      for(const {ds,key} of slots)schedule[ds][key]=null;
+      const c={};ids.forEach(id=>c[id]=0);
+      let filled=0;
+      const pending=shuffle(slots).sort((a,b)=>{
+        const ca=ids.filter(id=>canUseSlot(schedule[a.ds]||(schedule[a.ds]={}),id,a.ds,a.key)).length;
+        const cb=ids.filter(id=>canUseSlot(schedule[b.ds]||(schedule[b.ds]={}),id,b.ds,b.key)).length;
+        return ca-cb;
+      });
+      for(const slot of pending){
+        const s=schedule[slot.ds]||(schedule[slot.ds]={});
+        const candidates=ids.filter(id=>canUseSlot(s,id,slot.ds,slot.key));
+        if(!candidates.length)continue;
+        const noWork=candidates.filter(id=>!hasAnyInTime(s,id));
+        const base=noWork.length?noWork:candidates;
+        const minCnt=Math.min(...base.map(id=>c[id]||0));
+        const p=shuffle(base.filter(id=>(c[id]||0)===minCnt))[0];
+        s[slot.key]=p;
+        c[p]++;
+        filled++;
+      }
+      const r=countRange(c);
+      if(r<bestRange||(r===bestRange&&filled>bestFilled)){
+        bestRange=r;bestFilled=filled;
+        best=slots.map(({ds,key})=>({ds,key,id:schedule[ds]?.[key]||null}));
+        if(bestRange<=1&&bestFilled===slots.length)break;
+      }
+    }
+    for(const b of snapshot)Object.assign(schedule[b.ds]||(schedule[b.ds]={}),b.data);
+    if(!best)return false;
+    let changed=false;
+    for(const {ds,key,id} of best){
+      const prev=original.get(`${ds}|${key}`)||null;
+      if((schedule[ds]||{})[key]!==id){schedule[ds][key]=id;changed=true;}
+      if(prev!==id)changed=true;
+    }
+    return changed;
+  };
+  const backupKeysForOpdPm=['opd3_am','opd2_am','clinic_am','ncd_am','pcu_am','psychiatry_am','pcu_full'];
+  const giveBackupWork=(s,id,ds,skipKey)=>{
+    for(const key of backupKeysForOpdPm){
+      if(s[key])continue;
+      if(canUseSlot(s,id,ds,key,skipKey)){
+        s[key]=id;
+        return true;
+      }
+    }
+    return false;
+  };
+  const balanceByReplacing=(keys,filterDs,backupDonor=false)=>{
+    let changed=false;
+    for(let iter=0;iter<80;iter++){
+      const c=countFor(keys,filterDs);
+      const vals=ids.map(id=>c[id]||0),max=Math.max(...vals),min=Math.min(...vals);
+      if(max-min<=1)break;
+      let moved=false;
+      const over=shuffle(ids.filter(id=>c[id]===max));
+      const under=shuffle(ids.filter(id=>c[id]===min));
+      for(const fromId of over){
+        for(const toId of under){
+          for(const ds of shuffle(days.filter(filterDs))){
+            const s=schedule[ds]||{};
+            for(const key of keys){
+              if(s[key]!==fromId)continue;
+              if(!canUseSlot(s,toId,ds,key,key))continue;
+              const before={...s};
+              if(!hasOtherInTime(s,fromId,key)){
+                s[key]=null;
+                if(!backupDonor||!giveBackupWork(s,fromId,ds,key)){
+                  Object.keys(s).forEach(k=>delete s[k]);
+                  Object.assign(s,before);
+                  continue;
+                }
+              }
+              s[key]=toId;
+              changed=true;moved=true;
+              break;
+            }
+            if(moved)break;
+          }
+          if(moved)break;
+        }
+        if(moved)break;
+      }
+      if(!moved)break;
+    }
+    return changed;
+  };
+  const ingtawanNotAssigned=(ds,key)=>!ingtawan||schedule[ds]?.[key]!==ingtawan.id;
+  let changed=false;
+  changed=rebuildOpdPmBalanced()||changed;
+  changed=balanceByReplacing(['pcu_full'],ds=>isWorkday(ds)&&parseDate(ds).getDay()===2&&ingtawanNotAssigned(ds,'pcu_full'))||changed;
+  changed=balanceByReplacing(['pcu_am'],ds=>isWorkday(ds)&&parseDate(ds).getDay()===4&&ingtawanNotAssigned(ds,'pcu_am'))||changed;
+  changed=balanceByReplacing(['opd1_pm','opd2_pm','opd3_pm'],ds=>isWorkday(ds),true)||changed;
+  return changed;
+}
+function enforceRandomErDayBalance(schedule,days){
+  const rdocs=getRandomDoctors();
+  if(rdocs.length<2)return false;
+  const ids=rdocs.map(d=>d.id);
+  const idSet=new Set(ids);
+  const workDays=days.filter(ds=>isWorkday(ds));
+  if(!workDays.length)return false;
+  const hist=getHistoryTotals();
+  const histErDay={};
+  ids.forEach(id=>{histErDay[id]=(hist[id]||{}).er_day||0;});
+  const monthlyMin=Math.floor(workDays.length/ids.length);
+  const monthlyMax=Math.ceil(workDays.length/ids.length);
+  // [กฎใหม่] ER ในเวลาของแพทย์แต่ละคนต้องห่างกันไม่เกิน 1 (คิดสะสม = history + เดือนนี้)
+  // คำนวณ target final per doctor: tLow/tHigh = ค่าที่ทำให้สะสมห่างกันไม่เกิน 1
+  // → range จำนวน er_day เดือนนี้ของแต่ละคน = [max(0,tLow-hist), max(0,tHigh-hist)]
+  // ถ้าคนใดประวัติเกิน tHigh แล้วและไม่มีทางลด → range = [0,0] (ไม่เพิ่มเวรให้)
+  // ถ้าผลรวม min/max ครอบคลุม workDays.length ไม่ได้ → fallback กลับไป [monthlyMin,monthlyMax]
+  const totalCount=workDays.length;
+  const totalAfter=totalCount+ids.reduce((s,id)=>s+(histErDay[id]||0),0);
+  const tLow=Math.floor(totalAfter/ids.length);
+  const tHigh=Math.ceil(totalAfter/ids.length);
+  const cumIdRange={};
+  ids.forEach(id=>{
+    const h=histErDay[id]||0;
+    let lo=Math.max(0,tLow-h);
+    let hi=Math.max(0,tHigh-h);
+    if(hi>totalCount)hi=totalCount;
+    if(lo>hi)lo=hi;
+    cumIdRange[id]={min:lo,max:hi};
+  });
+  const cumMinSum=ids.reduce((s,id)=>s+cumIdRange[id].min,0);
+  const cumMaxSum=ids.reduce((s,id)=>s+cumIdRange[id].max,0);
+  const cumFeasible=cumMinSum<=totalCount&&totalCount<=cumMaxSum;
+  const monthlyIdRange={};
+  ids.forEach(id=>{monthlyIdRange[id]={min:monthlyMin,max:monthlyMax};});
+  const canUse=(id,ds)=>{
+    const s=schedule[ds]||(schedule[ds]={});
+    const lv=getDoctorLeave(id,ds);
+    if(lv)return false;
+    if(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_pm'))return false;
+    if(s.ward===id||s.off_am===id||s.opd1_am===id||s.er_night===id)return false;
+    if(s.pcu_full===id)return false;
+    return canAssignDoctorToSlot(id,'er_day',ds);
+  };
+  const dayCandidates=workDays.map(ds=>({ds,cands:ids.filter(id=>canUse(id,ds))}))
+    .sort((a,b)=>a.cands.length-b.cands.length);
+  if(dayCandidates.some(d=>!d.cands.length))return false;
+  const generateTargetOptions=(idRange)=>{
+    const remMin=new Array(ids.length+1).fill(0);
+    const remMax=new Array(ids.length+1).fill(0);
+    for(let i=ids.length-1;i>=0;i--){
+      remMin[i]=remMin[i+1]+idRange[ids[i]].min;
+      remMax[i]=remMax[i+1]+idRange[ids[i]].max;
+    }
+    const opts=[];
+    const MAX_OPTS=2000;
+    const dfs=(idx,remaining,counts)=>{
+      if(opts.length>=MAX_OPTS)return;
+      if(idx===ids.length){
+        if(remaining===0){
+          const vals=ids.map(id=>(histErDay[id]||0)+(counts[id]||0));
+          opts.push({counts:{...counts},cumRange:Math.max(...vals)-Math.min(...vals)});
+        }
+        return;
+      }
+      const id=ids[idx];
+      const r=idRange[id];
+      for(let n=r.min;n<=r.max;n++){
+        if(remaining-n<remMin[idx+1]||remaining-n>remMax[idx+1])continue;
+        counts[id]=n;
+        dfs(idx+1,remaining-n,counts);
+        if(opts.length>=MAX_OPTS)break;
+      }
+      delete counts[id];
+    };
+    dfs(0,workDays.length,{});
+    return opts;
+  };
+  const tryAssignTargets=targets=>{
+    const remaining={...targets};
+    const assigned={};
+    const memo=new Set();
+    const search=idx=>{
+      if(idx>=dayCandidates.length)return true;
+      const sig=idx+'|'+ids.map(id=>remaining[id]).join(',');
+      if(memo.has(sig))return false;
+      const {ds,cands}=dayCandidates[idx];
+      const ordered=shuffle(cands.filter(id=>remaining[id]>0)).sort((a,b)=>
+        ((histErDay[a]||0)+(targets[a]||0))-((histErDay[b]||0)+(targets[b]||0))||
+        remaining[b]-remaining[a]
+      );
+      for(const id of ordered){
+        remaining[id]--;
+        assigned[ds]=id;
+        if(search(idx+1))return true;
+        delete assigned[ds];
+        remaining[id]++;
+      }
+      memo.add(sig);
+      return false;
+    };
+    if(!search(0))return null;
+    return assigned;
+  };
+  const tryOptionsFromRange=(idRange)=>{
+    const opts=generateTargetOptions(idRange);
+    opts.sort((a,b)=>a.cumRange-b.cumRange);
+    for(const opt of opts){
+      const r=tryAssignTargets(opt.counts);
+      if(r)return r;
+    }
+    return null;
+  };
+  // Prefer a strict monthly even split first; cumulative history is only a tiebreaker.
+  let best=tryOptionsFromRange(monthlyIdRange);
+  if(!best&&cumFeasible)best=tryOptionsFromRange(cumIdRange);
+  if(!best){
+    const combinedIdRange={};
+    ids.forEach(id=>{
+      const c=cumIdRange[id];
+      const m=monthlyIdRange[id];
+      combinedIdRange[id]={
+        min:Math.max(0,Math.min(c.min,m.min)),
+        max:Math.min(workDays.length,Math.max(c.max,m.max))
+      };
+    });
+    best=tryOptionsFromRange(combinedIdRange);
+  }
+  if(!best)best=tryOptionsFromRange(monthlyIdRange);
+  if(!best)return false;
+  const ER_DAY_CLEARS=['opd2_am','opd3_am','opd2_pm','opd3_pm','pcu_am','ncd_am','clinic_am'];
+  let changed=false;
+  for(const ds of workDays){
+    const id=best[ds];
+    if(idSet.has(id)&&(schedule[ds]||{}).er_day!==id){
+      schedule[ds]=schedule[ds]||{};
+      for(const k of ER_DAY_CLEARS){if(schedule[ds][k]===id)schedule[ds][k]=null;}
+      schedule[ds].er_day=id;
+      changed=true;
+    }
+  }
+  return changed;
+}
+function enforceRandomHolidayDutyBalance(schedule,days){
+  const rdocs=getRandomDoctors();
+  if(rdocs.length<2)return false;
+  const ids=rdocs.map(d=>d.id);
+  const idSet=new Set(ids);
+  const offDays=days.filter(ds=>!isWorkday(ds));
+  const fixedHolidaySlotId=(ds,slot)=>{
+    for(const[did,dm]of Object.entries(state.fixedOncall||{})){
+      if(dm&&dm[ds]===slot)return parseInt(did);
+    }
+    return null;
+  };
+  const prevDate=ds=>{const d=parseDate(ds);d.setDate(d.getDate()-1);return fmt(d.getFullYear(),d.getMonth()+1,d.getDate());};
+  const nextWorkdayForHoliday=ds=>{
+    for(let i=days.indexOf(ds)+1;i<days.length;i++){
+      if(isWorkday(days[i]))return days[i];
+    }
+    return null;
+  };
+  const previousWorkdayForHoliday=ds=>{
+    let i=days.indexOf(ds)-1;
+    while(i>=0&&!isWorkday(days[i]))i--;
+    return i>=0?days[i]:null;
+  };
+  const nextWardIdForHoliday=ds=>{
+    const nds=nextWorkdayForHoliday(ds);
+    return nds?(schedule[nds]?.ward||state.wardWeeks[getWeekKey(nds)]||null):null;
+  };
+  const countStats=()=>{
+    const c={};
+    ids.forEach(id=>c[id]={ward_24:0,er_24:0,holiday_total:0});
+    for(const ds of days){
+      const s=schedule[ds]||{};
+      if(idSet.has(s.ward_24))c[s.ward_24].ward_24++;
+      if(idSet.has(s.er_24))c[s.er_24].er_24++;
+    }
+    ids.forEach(id=>c[id].holiday_total=c[id].ward_24+c[id].er_24);
+    return c;
+  };
+  const rangeOk=(c,key)=>{
+    const vals=ids.map(id=>c[id][key]||0);
+    return Math.max(...vals)-Math.min(...vals)<=1;
+  };
+  const canWard=(id,ds)=>{
+    if(fixedHolidaySlotId(ds,'ward'))return false;
+    const s=schedule[ds]||(schedule[ds]={});
+    if(s.er_24===id)return false;
+    if(getDoctorLeave(id,ds)==='full')return false;
+    if(hasMeetingNextDay(id,ds))return false;
+    if(hasDoctorConstraint(id,ds,'no_oncall'))return false;
+    if(nextWardIdForHoliday(ds)===id)return false;
+    return canAssignDoctorToSlot(id,'ward_24',ds);
+  };
+  const canEr=(id,ds)=>{
+    if(fixedHolidaySlotId(ds,'er'))return false;
+    const s=schedule[ds]||(schedule[ds]={});
+    const pds=prevDate(ds),nds=nextDateStr(ds);
+    const prevHolidayEr=!isWorkday(pds)?(schedule[pds]?.er_24||null):null;
+    const nextHolidayEr=!isWorkday(nds)?(schedule[nds]?.er_24||null):null;
+    const prevWork=previousWorkdayForHoliday(ds);
+    const prevWorkEr=prevWork?(schedule[prevWork]?.er_night||null):null;
+    if(s.ward_24===id||prevHolidayEr===id||nextHolidayEr===id||prevWorkEr===id)return false;
+    if(nextWardIdForHoliday(ds)===id)return false;
+    if(getDoctorLeave(id,ds)==='full')return false;
+    if(hasMeetingNextDay(id,ds))return false;
+    if(hasDoctorConstraint(id,ds,'no_oncall'))return false;
+    return canAssignDoctorToSlot(id,'er_24',ds);
+  };
+  const datesFor=(key,fromId)=>offDays.filter(ds=>{
+    const s=schedule[ds]||{};
+    if(key==='ward_24')return s.ward_24===fromId&&!fixedHolidaySlotId(ds,'ward');
+    return s.er_24===fromId&&!fixedHolidaySlotId(ds,'er');
+  });
+  const tryMove=(key,fromId,toId)=>{
+    for(const ds of shuffle(datesFor(key,fromId))){
+      if(key==='ward_24'){
+        if(!canWard(toId,ds))continue;
+        schedule[ds].ward_24=toId;
+        return true;
+      }
+      if(!canEr(toId,ds))continue;
+      schedule[ds].er_24=toId;
+      return true;
+    }
+    return false;
+  };
+  let changed=false;
+  for(let iter=0;iter<80;iter++){
+    const c=countStats();
+    if(rangeOk(c,'ward_24')&&rangeOk(c,'er_24')&&rangeOk(c,'holiday_total'))break;
+    let moved=false;
+    for(const key of ['holiday_total','er_24','ward_24']){
+      const vals=ids.map(id=>c[id][key]);
+      const max=Math.max(...vals),min=Math.min(...vals);
+      if(max-min<=1)continue;
+      for(const fromId of shuffle(ids.filter(id=>c[id][key]===max))){
+        for(const toId of shuffle(ids.filter(id=>c[id][key]===min))){
+          const moveKeys=key==='ward_24'?['ward_24']:key==='er_24'?['er_24']:['ward_24','er_24'].filter(k=>c[fromId][k]>c[toId][k]);
+          for(const moveKey of moveKeys){
+            if(tryMove(moveKey,fromId,toId)){moved=true;changed=true;break;}
+          }
+          if(moved)break;
+        }
+        if(moved)break;
+      }
+      if(moved)break;
+    }
+    if(!moved)break;
+  }
+  return changed;
+}
+function enforceRandomMonthlyDutyBalance(schedule,days){
+  const rdocs=getRandomDoctors();
+  if(rdocs.length<2)return false;
+  const ids=rdocs.map(d=>d.id),idSet=new Set(ids);
+  const _histEr=getHistoryTotals();
+  const wlErDay={};
+  rdocs.forEach(d=>{wlErDay[d.id]=_histEr[d.id]?.er_day||0;});
+  const offDays=days.filter(ds=>!isWorkday(ds));
+  const workDays=days.filter(ds=>isWorkday(ds));
+  const fixedHolidaySlotId=(ds,slot)=>{
+    for(const[did,dm]of Object.entries(state.fixedOncall||{})){
+      if(dm&&dm[ds]===slot)return parseInt(did);
+    }
+    return null;
+  };
+  const prevDate=ds=>{const d=parseDate(ds);d.setDate(d.getDate()-1);return fmt(d.getFullYear(),d.getMonth()+1,d.getDate());};
+  const nextWorkdayForHoliday=ds=>{
+    for(let i=days.indexOf(ds)+1;i<days.length;i++)if(isWorkday(days[i]))return days[i];
+    return null;
+  };
+  const previousWorkdayForHoliday=ds=>{
+    let i=days.indexOf(ds)-1;
+    while(i>=0&&!isWorkday(days[i]))i--;
+    return i>=0?days[i]:null;
+  };
+  const nextWardIdForHoliday=ds=>{
+    const nds=nextWorkdayForHoliday(ds);
+    return nds?(schedule[nds]?.ward||state.wardWeeks[getWeekKey(nds)]||null):null;
+  };
+  const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+  const countStats=()=>{
+    const c={};
+    ids.forEach(id=>c[id]={ward_24:0,er_night:0,er_24:0,er_day:0,holiday_total:0,total:0});
+    for(const ds of days){
+      const s=schedule[ds]||{};
+      if(idSet.has(s.ward_24))c[s.ward_24].ward_24++;
+      if(idSet.has(s.er_night))c[s.er_night].er_night++;
+      if(idSet.has(s.er_24))c[s.er_24].er_24++;
+      if(idSet.has(s.er_day))c[s.er_day].er_day++;
+    }
+    ids.forEach(id=>{
+      c[id].holiday_total=c[id].ward_24+c[id].er_24;
+      c[id].total=c[id].holiday_total+c[id].er_night;
+    });
+    return c;
+  };
+  const rangeOk=(c,key)=>{
+    const vals=ids.map(id=>c[id][key]||0);
+    return Math.max(...vals)-Math.min(...vals)<=1;
+  };
+  const allBalanced=c=>rangeOk(c,'ward_24')&&rangeOk(c,'er_night')&&rangeOk(c,'er_24')&&rangeOk(c,'er_day')&&rangeOk(c,'holiday_total')&&rangeOk(c,'total');
+  const cumulativeErDayOk=c=>{
+    const vals=ids.map(id=>(wlErDay[id]||0)+(c[id].er_day||0));
+    return Math.max(...vals)-Math.min(...vals)<=1;
+  };
+  const canWard=(id,ds)=>{
+    if(fixedHolidaySlotId(ds,'ward'))return false;
+    const s=schedule[ds]||(schedule[ds]={});
+    if(s.er_24===id)return false;
+    if(getDoctorLeave(id,ds)==='full')return false;
+    if(hasMeetingNextDay(id,ds)||hasDoctorConstraint(id,ds,'no_oncall'))return false;
+    if(nextWardIdForHoliday(ds)===id)return false;
+    return canAssignDoctorToSlot(id,'ward_24',ds);
+  };
+  const canErDay=(id,ds)=>{
+    if(!isWorkday(ds))return false;
+    const s=schedule[ds]||(schedule[ds]={});
+    const lv=getDoctorLeave(id,ds);
+    if(lv)return false;
+    if(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_pm'))return false;
+    if(s.ward===id||s.off_am===id||s.opd1_am===id||s.er_night===id)return false;
+    return canAssignDoctorToSlot(id,'er_day',ds);
+  };
+  const canEr=(id,ds)=>{
+    if(fixedHolidaySlotId(ds,'er'))return false;
+    const s=schedule[ds]||(schedule[ds]={});
+    const pds=prevDate(ds),nds=nextDateStr(ds);
+    const prevHolidayEr=!isWorkday(pds)?(schedule[pds]?.er_24||null):null;
+    const nextHolidayEr=!isWorkday(nds)?(schedule[nds]?.er_24||null):null;
+    const prevWork=previousWorkdayForHoliday(ds);
+    const prevWorkEr=prevWork?(schedule[prevWork]?.er_night||null):null;
+    if(s.ward_24===id||prevHolidayEr===id||nextHolidayEr===id||prevWorkEr===id)return false;
+    if(nextWardIdForHoliday(ds)===id)return false;
+    if(getDoctorLeave(id,ds)==='full')return false;
+    if(hasMeetingNextDay(id,ds)||hasDoctorConstraint(id,ds,'no_oncall'))return false;
+    return canAssignDoctorToSlot(id,'er_24',ds);
+  };
+  const erNightSteals=['opd2_am','opd3_am','opd2_pm','opd3_pm','opd1_pm','ncd_am','clinic_am','pcu_am','pcu_full'];
+  const canErNight=(id,ds)=>{
+    const s=schedule[ds]||(schedule[ds]={});
+    if(!canAssignDoctorToSlot(id,'opd1_am',ds))return false;
+    const lv=getDoctorLeave(id,ds);
+    if(lv==='full'||lv==='meeting'||lv==='half_am')return false;
+    if(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_oncall')||hasMeetingNextDay(id,ds))return false;
+    if(s.ward===id||s.off_am===id||s.er_day===id)return false;
+    const nextWorkday=nextWorkdayForHoliday(ds);
+    const nextWardId=nextWorkday?state.wardWeeks[getWeekKey(nextWorkday)]:null;
+    if(nextWardId&&nextWardId!==state.wardWeeks[getWeekKey(ds)]&&id===nextWardId)return false;
+    const nds=nextDateStr(ds);
+    if(!isWorkday(nds)&&schedule[nds]?.er_24===id)return false;
+    const protectedKeys=new Set(['ward','off_am','er_day','psychiatry_am','geriatric_am','palliative_pm',
+      'acupuncture_pm','dm_remission_pm','telemedicine_pm']);
+    for(const k of heldKeys(s,id)){
+      if(k==='opd1_am'||k==='er_night')continue;
+      if(protectedKeys.has(k))return false;
+      if(!erNightSteals.includes(k))return false;
+    }
+    return true;
+  };
+  const assignErNight=(ds,id)=>{
+    const s=schedule[ds]||(schedule[ds]={});
+    for(const k of erNightSteals){if(s[k]===id)s[k]=null;}
+    s.opd1_am=id;s.er_night=id;
+  };
+  const datesFor=(key,fromId)=>{
+    if(key==='ward_24')return offDays.filter(ds=>(schedule[ds]||{}).ward_24===fromId&&!fixedHolidaySlotId(ds,'ward'));
+    if(key==='er_24')return offDays.filter(ds=>(schedule[ds]||{}).er_24===fromId&&!fixedHolidaySlotId(ds,'er'));
+    if(key==='er_day')return workDays.filter(ds=>(schedule[ds]||{}).er_day===fromId);
+    return workDays.filter(ds=>{
+      const s=schedule[ds]||{};
+      return s.er_night===fromId&&s.opd1_am===fromId;
+    });
+  };
+  const tryMove=(key,fromId,toId)=>{
+    for(const ds of shuffle(datesFor(key,fromId))){
+      const s=schedule[ds]||(schedule[ds]={});
+      if(key==='ward_24'){
+        if(!canWard(toId,ds))continue;
+        s.ward_24=toId;return true;
+      }
+      if(key==='er_24'){
+        if(!canEr(toId,ds))continue;
+        s.er_24=toId;return true;
+      }
+      if(key==='er_day'){
+        if(!canErDay(toId,ds))continue;
+        s.er_day=toId;wlErDay[toId]=(wlErDay[toId]||0)+1;if(wlErDay[fromId]!==undefined)wlErDay[fromId]--;return true;
+      }
+      if(!canErNight(toId,ds))continue;
+      assignErNight(ds,toId);return true;
+    }
+    return false;
+  };
+  const tryMoveErNightChain=(fromId,toId)=>{
+    for(const midId of shuffle(ids.filter(id=>id!==fromId&&id!==toId))){
+      for(const ds1 of shuffle(datesFor('er_night',fromId))){
+        if(!canErNight(midId,ds1))continue;
+        const before1={...(schedule[ds1]||{})};
+        assignErNight(ds1,midId);
+        for(const ds2 of shuffle(datesFor('er_night',midId))){
+          if(ds2===ds1)continue;
+          if(!canErNight(toId,ds2))continue;
+          assignErNight(ds2,toId);
+          return true;
+        }
+        schedule[ds1]=before1;
+      }
+    }
+    return false;
+  };
+  const balanceScore=c=>{
+    let score=0;
+    for(const key of ['ward_24','er_night','er_24','er_day','holiday_total','total']){
+      const vals=ids.map(id=>c[id][key]||0);
+      const r=Math.max(...vals)-Math.min(...vals);
+      if(r>1)score+=(r-1)*(key==='total'||key==='holiday_total'?1000:700);
+      score+=r;
+    }
+    {const cvals=ids.map(id=>(wlErDay[id]||0)+(c[id].er_day||0));const cr=Math.max(...cvals)-Math.min(...cvals);if(cr>1)score+=(cr-1)*700;score+=cr;}
+    return score;
+  };
+  const candidateMoves=(key,fromId,toId)=>shuffle(datesFor(key,fromId).map(ds=>({key,ds,toId}))).filter(m=>{
+    if(m.key==='ward_24')return canWard(m.toId,m.ds);
+    if(m.key==='er_24')return canEr(m.toId,m.ds);
+    if(m.key==='er_day')return canErDay(m.toId,m.ds);
+    return canErNight(m.toId,m.ds);
+  });
+  const applyMove=m=>{
+    const before={ds:m.ds,data:{...(schedule[m.ds]||{})}};
+    const prevErDayId=m.key==='er_day'?before.data.er_day:null;
+    if(m.key==='ward_24'){
+      if(!canWard(m.toId,m.ds))return null;
+      schedule[m.ds].ward_24=m.toId;
+      return [before];
+    }
+    if(m.key==='er_24'){
+      if(!canEr(m.toId,m.ds))return null;
+      schedule[m.ds].er_24=m.toId;
+      return [before];
+    }
+    if(m.key==='er_day'){
+      if(!canErDay(m.toId,m.ds))return null;
+      schedule[m.ds].er_day=m.toId;
+      if(prevErDayId&&wlErDay[prevErDayId]!==undefined)wlErDay[prevErDayId]--;
+      wlErDay[m.toId]=(wlErDay[m.toId]||0)+1;
+      return [before];
+    }
+    if(!canErNight(m.toId,m.ds))return null;
+    assignErNight(m.ds,m.toId);
+    return [before];
+  };
+  const undoMove=(before,key,prevId,newId)=>{for(const b of before)schedule[b.ds]=b.data;if(key==='er_day'&&newId!==undefined&&prevId!==undefined){if(newId&&wlErDay[newId]!==undefined)wlErDay[newId]--;if(prevId&&wlErDay[prevId]!==undefined)wlErDay[prevId]++;}};
+  const tryMoveSequence=(moves,baseScore)=>{
+    const applied=[];
+    const moveLog=[];
+    for(const m of moves){
+      const prevId=m.key==='er_day'?(schedule[m.ds]||{}).er_day:null;
+      const before=applyMove(m);
+      if(!before){for(let i=applied.length-1;i>=0;i--)undoMove(applied[i],moveLog[i]?.key,moveLog[i]?.newId,moveLog[i]?.prevId);return false;}
+      applied.push(before);moveLog.push({key:m.key,prevId,newId:m.toId});
+    }
+    const c=countStats();
+    if((allBalanced(c)&&cumulativeErDayOk(c))||balanceScore(c)<baseScore)return true;
+    for(let i=applied.length-1;i>=0;i--)undoMove(applied[i],moveLog[i]?.key,moveLog[i]?.newId,moveLog[i]?.prevId);
+    return false;
+  };
+  const tryCompositeHolidayBalance=c=>{
+    const base=balanceScore(c);
+    for(const primaryKey of ['er_24','ward_24']){
+      const vals=ids.map(id=>c[id][primaryKey]);
+      const max=Math.max(...vals),min=Math.min(...vals);
+      if(max-min<=1)continue;
+      for(const fromId of shuffle(ids.filter(id=>c[id][primaryKey]===max))){
+        for(const toId of shuffle(ids.filter(id=>c[id][primaryKey]===min))){
+          for(const primary of candidateMoves(primaryKey,fromId,toId).slice(0,60)){
+            if(tryMoveSequence([primary],base))return true;
+            for(const compKey of shuffle(['er_night','ward_24','er_24'].filter(k=>k!==primaryKey&&c[toId][k]>c[fromId][k]))){
+              for(const comp of candidateMoves(compKey,toId,fromId).slice(0,60)){
+                if(tryMoveSequence([primary,comp],base)||tryMoveSequence([comp,primary],base))return true;
+              }
+            }
+          }
+        }
+      }
+    }
+    return false;
+  };
+  let changed=enforceRandomHolidayDutyBalance(schedule,days);
+  for(const ds of days){const s=schedule[ds]||{};if(idSet.has(s.er_day))wlErDay[s.er_day]=(wlErDay[s.er_day]||0)+1;}
+  for(let iter=0;iter<80;iter++){
+    const c=countStats();
+    if(allBalanced(c)&&cumulativeErDayOk(c))break;
+    let moved=false;
+    for(const key of ['er_day','er_24','holiday_total','total','er_night','ward_24']){
+      const vals=ids.map(id=>c[id][key]);
+      const max=Math.max(...vals),min=Math.min(...vals);
+      if(max-min<=1)continue;
+      for(const fromId of shuffle(ids.filter(id=>c[id][key]===max))){
+        for(const toId of shuffle(ids.filter(id=>c[id][key]===min))){
+          const moveKeys=key==='er_24'?['er_24']:
+            key==='ward_24'?['ward_24']:
+            key==='er_night'?['er_night']:
+            key==='er_day'?['er_day']:
+            key==='holiday_total'?['er_24','ward_24'].filter(k=>c[fromId][k]>c[toId][k]):
+            ['er_night','er_24','ward_24'].filter(k=>c[fromId][k]>c[toId][k]);
+          for(const moveKey of moveKeys){
+            if(tryMove(moveKey,fromId,toId)||
+              (moveKey==='er_night'&&tryMoveErNightChain(fromId,toId))){moved=true;changed=true;break;}
+          }
+          if(moved)break;
+        }
+        if(moved)break;
+      }
+      if(moved)break;
+    }
+    if(!moved&&tryCompositeHolidayBalance(c)){moved=true;changed=true;}
+    if(!moved)break;
+  }
+  return changed;
+}
+const getActiveDoctors=()=>state.doctors.filter(d=>d.status==='active');
+const getRandomDoctors=()=>state.doctors.filter(d=>d.type==='random'&&d.status==='active');
+const getDoctorColor=id=>{const doc=getDoctorById(id);const idx=(doc&&doc.colorIdx!==undefined)?doc.colorIdx:(id-1)%DC.length;return DC[idx%DC.length];};
+// หาสีที่ยังไม่ถูกใช้โดยแพทย์ที่ active/transferred_in (แพทย์ย้ายออกคืนสีได้)
+function assignFreeColorIdx(){
+  const usedIdxs=new Set(state.doctors.filter(d=>d.status!=='transferred_out').map(d=>d.colorIdx!==undefined?d.colorIdx:(d.id-1)%DC.length));
+  for(let i=0;i<DC.length;i++){if(!usedIdxs.has(i))return i;}
+  return 0;
+}
+const getDoctorLeave=(id,ds)=>(state.leaves[ds]||{})[id]||null;
+const getDoctorConstraints=(id,ds)=>{
+  const v=(state.constraints[ds]||{})[id];
+  if(Array.isArray(v))return v;
+  return v?[v]:[];
+};
+const getDoctorConstraint=(id,ds)=>getDoctorConstraints(id,ds)[0]||null;
+const hasDoctorConstraint=(id,ds,type)=>getDoctorConstraints(id,ds).includes(type);
+const monthKey=(y=state.year,m=state.month)=>`${y}-${String(m).padStart(2,'0')}`;
+const isMonthLocked=(y=state.year,m=state.month)=>!!(state.historyMonths&&state.historyMonths[monthKey(y,m)]);
+const isDateLocked=ds=>{const d=parseDate(ds);return isMonthLocked(d.getFullYear(),d.getMonth()+1);};
+function nextDateStr(ds){const d=parseDate(ds);d.setDate(d.getDate()+1);return fmt(d.getFullYear(),d.getMonth()+1,d.getDate());}
+const hasMeetingNextDay=(id,ds)=>getDoctorLeave(id,nextDateStr(ds))==='meeting';
+function shuffle(arr){const a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+// คืนค่า "YYYY-MM" ของเดือนที่ควร "เป็นเจ้าของ" สัปดาห์ WARD นั้น
+// = เดือนที่มีวันทำการมากกว่าในสัปดาห์นั้น; ถ้าเท่ากันให้เดือนที่อยู่ก่อน
+function getWardOwnerMonth(wk){
+  const weekStart=parseDate(wk);
+  const monthCounts={};
+  for(let i=0;i<5;i++){
+    const d=new Date(weekStart);d.setDate(weekStart.getDate()+i);
+    const ds=fmt(d.getFullYear(),d.getMonth()+1,d.getDate());
+    if(isWorkday(ds)){
+      const mk=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      monthCounts[mk]=(monthCounts[mk]||0)+1;
+    }
+  }
+  let owner=null;let maxCnt=0;
+  for(const[mk,cnt] of Object.entries(monthCounts)){
+    if(cnt>maxCnt||(cnt===maxCnt&&(!owner||mk<owner))){maxCnt=cnt;owner=mk;}
+  }
+  return owner;
+}
+function pickMin(pool,excl,counter){
+  const av=pool.filter(d=>!excl.has(d.id));
+  if(!av.length)return null;
+  const mn=Math.min(...av.map(d=>counter[d.id]||0));
+  return shuffle(av.filter(d=>(counter[d.id]||0)===mn))[0]||null;
+}
+function getHistoryTotals(){
+  const totals={};
+  for(const d of state.doctors)totals[d.id]={ward_weeks:0,er_day:0,er_night:0,er_24:0,ward_24:0};
+  const months=state.historyMonths||{};
+  if(Object.keys(months).length){
+    for(const monthData of Object.values(months)){
+      for(const[did,h]of Object.entries(monthData||{})){
+        if(!totals[did])totals[did]={ward_weeks:0,er_day:0,er_night:0,er_24:0,ward_24:0};
+        for(const key of ['ward_weeks','er_day','er_night','er_24','ward_24'])totals[did][key]+=(h[key]||0);
+      }
+    }
+  }else{
+    for(const[did,h]of Object.entries(state.history||{})){
+      totals[did]={ward_weeks:h.ward_weeks||0,er_day:h.er_day||0,er_night:h.er_night||0,er_24:h.er_24||0,ward_24:h.ward_24||0};
+    }
+  }
+  return totals;
+}
+
+// ===================== LOCALSTORAGE =====================
+const STATE_KEY='activityDoctor_v2';
+const STATE_KEYS=['doctors','leaves','schedule','fixedOncall','wardWeeks','constraints','history','historyMonths','generatedMonths','holidays','year','month'];
+// ใส่ค่า Firebase config จาก Project settings > General > Your apps > Web app
+// ถ้ายังไม่ใส่ config แอปจะใช้ localStorage เหมือนเดิม
+const FIREBASE_CONFIG={
+  apiKey:'AIzaSyDaS_9d4BUTHcVB1hjkq49k2UMvMK1crsg',
+  authDomain:'activity-doctor.firebaseapp.com',
+  projectId:'activity-doctor',
+  storageBucket:'activity-doctor.firebasestorage.app',
+  messagingSenderId:'139196935218',
+  appId:'1:139196935218:web:13dd794f3ac9baec9a202b',
+  measurementId:'G-953582GNDQ'
+};
+const FIREBASE_COLLECTION='activityDoctor';
+const FIREBASE_DOC_ID='mainSchedule';
+let cloudDb=null,cloudReady=false,cloudSaveTimer=null,cloudApplying=false,cloudLastSaved=0;
+function getSerializableState(){
+  const out={};
+  STATE_KEYS.forEach(k=>{out[k]=state[k];});
+  return out;
+}
+function applyStateData(saved){
+  if(!saved)return false;
+  STATE_KEYS.forEach(k=>{if(saved[k]!==undefined)state[k]=saved[k];});
+  return true;
+}
+function setCloudStatus(text,kind='local'){
+  const el=document.getElementById('cloudStatus');
+  if(!el)return;
+  const cls={
+    local:'text-indigo-100 bg-white/10 border-white/20',
+    ok:'text-emerald-100 bg-emerald-500/30 border-emerald-200/40',
+    warn:'text-amber-100 bg-amber-500/30 border-amber-200/40',
+    err:'text-red-100 bg-red-500/30 border-red-200/40'
+  }[kind]||'text-indigo-100 bg-white/10 border-white/20';
+  el.className=`text-[11px] border rounded-lg px-2 py-1 ${cls}`;
+  el.textContent=text;
+}
+function isFirebaseConfigured(){
+  return !!(FIREBASE_CONFIG.apiKey&&FIREBASE_CONFIG.projectId&&FIREBASE_CONFIG.appId);
+}
+function renderAll(){
+  document.getElementById('selMonth').value=state.month;
+  document.getElementById('selYear').value=state.year;
+  initPickers();renderDoctorLists();renderLeaveDropdown();renderConstraintDropdown();
+  renderSchedule();renderSummary();renderLeaveList();renderConstraintList();renderHolidayList();renderOncallCalendar();
+}
+async function initFirebaseCloud(){
+  if(!isFirebaseConfigured()){
+    setCloudStatus('Local only','local');
+    return;
+  }
+  if(!window.firebase){
+    setCloudStatus('Firebase SDK ไม่พร้อม','err');
+    return;
+  }
+  try{
+    if(!firebase.apps.length)firebase.initializeApp(FIREBASE_CONFIG);
+    cloudDb=firebase.firestore();
+    cloudReady=true;
+    setCloudStatus('Cloud connecting','warn');
+    await loadCloudState();
+  }catch(e){
+    console.warn('initFirebaseCloud:',e);
+    setCloudStatus('Cloud error','err');
+  }
+}
+async function loadCloudState(){
+  if(!cloudReady||!cloudDb)return false;
+  try{
+    const ref=cloudDb.collection(FIREBASE_COLLECTION).doc(FIREBASE_DOC_ID);
+    const snap=await ref.get();
+    if(snap.exists&&snap.data()?.state){
+      cloudApplying=true;
+      applyStateData(snap.data().state);
+      localStorage.setItem(STATE_KEY,JSON.stringify(getSerializableState()));
+      renderAll();
+      cloudApplying=false;
+      setCloudStatus('Cloud loaded','ok');
+    }else{
+      await saveCloudStateNow();
+      setCloudStatus('Cloud created','ok');
+    }
+    return true;
+  }catch(e){
+    cloudApplying=false;
+    console.warn('loadCloudState:',e);
+    setCloudStatus('Cloud load failed','err');
+    return false;
+  }
+}
+function saveCloudStateDebounced(){
+  if(!cloudReady||cloudApplying)return;
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer=setTimeout(()=>saveCloudStateNow(),700);
+}
+async function saveCloudStateNow(){
+  if(!cloudReady||!cloudDb)return false;
+  try{
+    const payload={state:getSerializableState(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
+    await cloudDb.collection(FIREBASE_COLLECTION).doc(FIREBASE_DOC_ID).set(payload,{merge:true});
+    cloudLastSaved=Date.now();
+    setCloudStatus('Cloud saved','ok');
+    return true;
+  }catch(e){
+    console.warn('saveCloudStateNow:',e);
+    setCloudStatus('Cloud save failed','err');
+    return false;
+  }
+}
+async function syncCloudNow(){
+  if(!isFirebaseConfigured()){
+    alert('ยังไม่ได้ตั้งค่า Firebase config ในไฟล์ index.html');
+    setCloudStatus('Local only','local');
+    return;
+  }
+  if(!cloudReady)await initFirebaseCloud();
+  await saveCloudStateNow();
+}
+function saveState(){
+  try{
+    localStorage.setItem(STATE_KEY,JSON.stringify(getSerializableState()));
+    saveCloudStateDebounced();
+  }catch(e){console.warn('saveState:',e);}
+}
+function loadState(){
+  try{
+    const raw=localStorage.getItem(STATE_KEY);
+    if(!raw)return false;
+    const saved=JSON.parse(raw);
+    return applyStateData(saved);
+  }catch(e){console.warn('loadState:',e);return false;}
+}
+async function resetState(){
+  if(!confirm('ล้างข้อมูลทั้งหมดและเริ่มใหม่หรือไม่?'))return;
+  try{
+    if(isFirebaseConfigured()){
+      if(!cloudReady)await initFirebaseCloud();
+      if(cloudReady&&cloudDb)await cloudDb.collection(FIREBASE_COLLECTION).doc(FIREBASE_DOC_ID).delete();
+    }
+  }catch(e){console.warn('reset cloud:',e);}
+  localStorage.removeItem(STATE_KEY);location.reload();
+}
+
+// ===================== DATE PICKERS =====================
+function buildPickerHTML(pfx){
+  const yr=state.year; const mo=state.month;
+  let dayOpts='',monOpts='',yrOpts='';
+  for(let d=1;d<=31;d++)dayOpts+=`<option value="${d}">${d}</option>`;
+  for(let m=1;m<=12;m++)monOpts+=`<option value="${m}"${m===mo?' selected':''}>${TH_MONTHS[m]}</option>`;
+  for(let y=yr-2;y<=yr+3;y++)yrOpts+=`<option value="${y}"${y===yr?' selected':''}>${y+543}</option>`;
+  return `<select id="${pfx}_d" class="th-sel flex-1 text-sm">${dayOpts}</select>
+          <select id="${pfx}_m" class="th-sel flex-1 text-sm">${monOpts}</select>
+          <select id="${pfx}_y" class="th-sel flex-1 text-sm">${yrOpts}</select>`;
+}
+const getPickerVal=pfx=>{
+  const d=parseInt(document.getElementById(pfx+'_d')?.value||0),
+        m=parseInt(document.getElementById(pfx+'_m')?.value||0),
+        y=parseInt(document.getElementById(pfx+'_y')?.value||0);
+  return(d&&m&&y)?fmt(y,m,d):null;
+};
+function copyPickerVal(fromPfx,toPfx){
+  ['d','m','y'].forEach(part=>{
+    const from=document.getElementById(`${fromPfx}_${part}`);
+    const to=document.getElementById(`${toPfx}_${part}`);
+    if(from&&to)to.value=from.value;
+  });
+}
+function setRangePickerVisible(kind,visible){
+  const isLeave=kind==='leave';
+  const group=document.getElementById(isLeave?'leaveEndGroup':'conEndGroup');
+  const btn=document.getElementById(isLeave?'leaveRangeBtn':'conRangeBtn');
+  if(!group||!btn)return;
+  if(visible)copyPickerVal(isLeave?'lvS':'cnS',isLeave?'lvE':'cnE');
+  group.classList.toggle('hidden',!visible);
+  btn.classList.toggle('hidden',visible);
+}
+function showRangePicker(kind){setRangePickerVisible(kind,true);}
+function isRangePickerVisible(kind){
+  const group=document.getElementById(kind==='leave'?'leaveEndGroup':'conEndGroup');
+  return !!group&&!group.classList.contains('hidden');
+}
+function resetRangePickers(){
+  setRangePickerVisible('leave',false);
+  setRangePickerVisible('constraint',false);
+}
+function initPickers(){
+  ['leaveStartPicker','leaveEndPicker'].forEach((id,i)=>document.getElementById(id).innerHTML=buildPickerHTML(['lvS','lvE'][i]));
+  document.getElementById('holidayDatePicker').innerHTML=buildPickerHTML('hol');
+  ['conStartPicker','conEndPicker'].forEach((id,i)=>document.getElementById(id).innerHTML=buildPickerHTML(['cnS','cnE'][i]));
+  resetRangePickers();
+}
+
+// ===================== SCHEDULE GENERATION =====================
+function generateSchedule(){
+  if(isMonthLocked()){
+    alert(`เดือน${TH_MONTHS[state.month]} ${state.year+543} บันทึกสถิติแล้ว\nกรุณาลบสถิติเดือนนี้ก่อนจึงจะแก้ไข/สุ่มตารางได้`);
+    return;
+  }
+  const{year,month}=state;
+  const days=getDaysInMonth(year,month);
+  const ns={...state.schedule},ww={...state.wardWeeks};
+  const rdocs=getRandomDoctors();
+  const firstDay=parseDate(days[0]);
+
+  // History-based counters (cumulative = history + this month)
+  const wlWard={},wlErDay={},wlErNight={},wlEr24={};
+  const wlWard24={};
+  const historyTotals=getHistoryTotals();
+  rdocs.forEach(d=>{
+    const h=historyTotals[d.id]||{};
+    wlWard[d.id]=h.ward_weeks||0;
+    wlErDay[d.id]=h.er_day||0;
+    wlErNight[d.id]=h.er_night||0;
+    wlEr24[d.id]=h.er_24||0;
+    wlWard24[d.id]=h.ward_24||0;
+  });
+  // Monthly counters (เพื่อให้ต่างกันไม่เกิน 1 ต่อเดือน)
+  const mWard={},mWard24={},mErDay={},mErNight={},mEr24={},mErOncall={},mHoliday24={},mOpdPm={};
+  rdocs.forEach(d=>{mWard[d.id]=0;mWard24[d.id]=0;mErDay[d.id]=0;mErNight[d.id]=0;mEr24[d.id]=0;mErOncall[d.id]=0;mHoliday24[d.id]=0;mOpdPm[d.id]=0;});
+  // wlWardTotal = WARD สะสมรวม (สัปดาห์ + วันหยุด) → ใช้เป็น tiebreaker เพื่อให้รวมห่างกันไม่เกิน 1
+  const wlWardTotal={};
+  rdocs.forEach(d=>{wlWardTotal[d.id]=(wlWard[d.id]||0)+(wlWard24[d.id]||0);});
+  // pickBal: เลือกจาก monthly min ก่อน, ถ้าเท่ากันใช้ secondary ถ้าเท่ากันอีกใช้ cumulative
+  const pickBal=(pool,excl,cnt1,cnt2,cnt3)=>{
+    const av=pool.filter(d=>!excl.has(d.id));
+    if(!av.length)return null;
+    const mn1=Math.min(...av.map(d=>cnt1[d.id]||0));
+    const p1=av.filter(d=>(cnt1[d.id]||0)===mn1);
+    if(!cnt2)return shuffle(p1)[0]||null;
+    const mn2=Math.min(...p1.map(d=>cnt2[d.id]||0));
+    const p2=p1.filter(d=>(cnt2[d.id]||0)===mn2);
+    if(!cnt3)return shuffle(p2)[0]||null;
+    const mn3=Math.min(...p2.map(d=>cnt3[d.id]||0));
+    return shuffle(p2.filter(d=>(cnt3[d.id]||0)===mn3))[0]||null;
+  };
+  const fairMonthlyPool=(pool,counter)=>{
+    if(!rdocs.length)return [];
+    const mn=Math.min(...rdocs.map(d=>counter[d.id]||0));
+    return pool.filter(d=>(counter[d.id]||0)===mn);
+  };
+  const fixedHolidaySlotId=(ds,slot)=>{
+    for(const[did,dm]of Object.entries(state.fixedOncall||{})){
+      if(dm&&dm[ds]===slot)return parseInt(did);
+    }
+    return null;
+  };
+  const previousWorkdayForHoliday=ds=>{
+    let i=days.indexOf(ds)-1;
+    while(i>=0&&!isWorkday(days[i]))i--;
+    if(i>=0)return days[i];
+    const d=parseDate(ds);
+    for(let step=1;step<=14;step++){
+      const p=new Date(d);p.setDate(d.getDate()-step);
+      const pds=fmt(p.getFullYear(),p.getMonth()+1,p.getDate());
+      if(isWorkday(pds))return pds;
+    }
+    return null;
+  };
+  const nextWorkdayForHoliday=ds=>{
+    for(let i=days.indexOf(ds)+1;i<days.length;i++){
+      if(isWorkday(days[i]))return days[i];
+    }
+    return null;
+  };
+  const repairHolidayEr24=()=>{
+    const offDays=days.filter(ds=>!isWorkday(ds));
+    if(!offDays.length)return true;
+    const baseEr24={},baseOncall={},assignedEr24={},assignedOncall={};
+    rdocs.forEach(d=>{baseEr24[d.id]=0;baseOncall[d.id]=0;assignedEr24[d.id]=0;assignedOncall[d.id]=0;});
+    for(const ds of days){
+      const s=ns[ds]||{};
+      if(isWorkday(ds)){
+        const id=s.er_night;
+        if(baseOncall[id]!==undefined)baseOncall[id]++;
+      }else{
+        const fixedEr=fixedHolidaySlotId(ds,'er');
+        if(fixedEr&&baseEr24[fixedEr]!==undefined){baseEr24[fixedEr]++;baseOncall[fixedEr]++;}
+      }
+    }
+    const prevWorkdayErNight=ds=>{
+      const pds=previousWorkdayForHoliday(ds);
+      return pds?(ns[pds]?.er_night||state.schedule[pds]?.er_night||null):null;
+    };
+    const nextWorkdayWard=ds=>{
+      const nds=nextWorkdayForHoliday(ds);
+      return nds?(ns[nds]?.ward||ww[getWeekKey(nds)]||null):null;
+    };
+    const resetAssigned=()=>rdocs.forEach(d=>{assignedEr24[d.id]=0;assignedOncall[d.id]=0;});
+    const originalEr24=new Map(offDays.map(ds=>[ds,ns[ds]?.er_24||null]));
+    const originalWard24=new Map(offDays.map(ds=>[ds,ns[ds]?.ward_24||null]));
+    const clearAutoEr24=()=>{
+      for(const ds of offDays){
+        if(!ns[ds])ns[ds]={};
+        const fixedEr=fixedHolidaySlotId(ds,'er');
+        ns[ds].er_24=fixedEr||null;
+      }
+    };
+    const restoreHolidayOncall=()=>{
+      for(const ds of offDays){
+        if(!ns[ds])ns[ds]={};
+        ns[ds].er_24=originalEr24.get(ds)||null;
+        ns[ds].ward_24=originalWard24.get(ds)||null;
+      }
+    };
+    const prevHolidayEr=(idx,prevEr,ds)=>{
+      const d=parseDate(ds);d.setDate(d.getDate()-1);
+      const pds=fmt(d.getFullYear(),d.getMonth()+1,d.getDate());
+      if(idx>0&&offDays[idx-1]===pds)return prevEr;
+      if(idx===0&&!isWorkday(pds))return state.schedule[pds]?.er_24||null;
+      return null;
+    };
+    const candidateIds=(ds,prevEr)=>{
+      const fixedEr=fixedHolidaySlotId(ds,'er');
+      if(fixedEr)return [fixedEr];
+      const s=ns[ds]||(ns[ds]={});
+      const prevNight=prevWorkdayErNight(ds);
+      const nextWardId=nextWorkdayWard(ds);
+      const blocked=new Set([s.ward_24,prevEr,prevNight,nextWardId].filter(Boolean));
+      return shuffle(rdocs.filter(d=>{
+        if(blocked.has(d.id))return false;
+        const lv=getDoctorLeave(d.id,ds);
+        if(lv==='full')return false;
+        if(hasMeetingNextDay(d.id,ds))return false;
+        if(nextWardId&&d.id===nextWardId)return false;
+        if(hasDoctorConstraint(d.id,ds,'no_oncall'))return false;
+        return true;
+      })).sort((a,b)=>{
+        const erA=(baseEr24[a.id]||0)+(assignedEr24[a.id]||0);
+        const erB=(baseEr24[b.id]||0)+(assignedEr24[b.id]||0);
+        if(erA!==erB)return erA-erB;
+        const ocA=(baseOncall[a.id]||0)+(assignedOncall[a.id]||0);
+        const ocB=(baseOncall[b.id]||0)+(assignedOncall[b.id]||0);
+        if(ocA!==ocB)return ocA-ocB;
+        return ((historyTotals[a.id]||{}).er_24||0)-((historyTotals[b.id]||{}).er_24||0);
+      }).map(d=>d.id);
+    };
+    const search=(idx,prevEr)=>{
+      if(idx>=offDays.length)return true;
+      const ds=offDays[idx];
+      const effectivePrevEr=prevHolidayEr(idx,prevEr,ds);
+      for(const id of candidateIds(ds,effectivePrevEr)){
+        const fixedEr=fixedHolidaySlotId(ds,'er');
+        ns[ds].er_24=id;
+        if(!fixedEr&&assignedEr24[id]!==undefined){assignedEr24[id]++;assignedOncall[id]++;}
+        if(search(idx+1,id))return true;
+        if(!fixedEr&&assignedEr24[id]!==undefined){assignedEr24[id]--;assignedOncall[id]--;}
+        ns[ds].er_24=null;
+      }
+      return false;
+    };
+    const refillHolidayWard24=()=>{
+      for(const ds of offDays){
+        const fixedWard=fixedHolidaySlotId(ds,'ward');
+        if(fixedWard){ns[ds].ward_24=fixedWard;continue;}
+        if(ns[ds].ward_24&&ns[ds].ward_24!==ns[ds].er_24)continue;
+        ns[ds].ward_24=null;
+        const nextWardId=nextWorkdayWard(ds);
+        const pool=rdocs.filter(d=>{
+          if(ns[ds].er_24===d.id)return false;
+          const lv=getDoctorLeave(d.id,ds);
+          if(lv==='full')return false;
+          if(hasMeetingNextDay(d.id,ds))return false;
+          if(nextWardId&&d.id===nextWardId)return false;
+          if(hasDoctorConstraint(d.id,ds,'no_oncall'))return false;
+          return true;
+        });
+        const p=pickBal(pool,new Set([ns[ds].er_24].filter(Boolean)),mWard24,wlWardTotal);
+        if(p)ns[ds].ward_24=p.id;
+      }
+    };
+    clearAutoEr24();resetAssigned();
+    if(search(0,null)){refillHolidayWard24();return true;}
+    for(const ds of offDays){if(!fixedHolidaySlotId(ds,'ward'))ns[ds].ward_24=null;}
+    clearAutoEr24();resetAssigned();
+    if(search(0,null)){refillHolidayWard24();return true;}
+    restoreHolidayOncall();
+    console.warn('Unable to fill every holiday ER without breaking existing hard rules.');
+    return false;
+  };
+  const balanceRandomMonthlyDuties=()=>{
+    if(rdocs.length<2)return true;
+    const ids=rdocs.map(d=>d.id);
+    const idSet=new Set(ids);
+    const offDays=days.filter(ds=>!isWorkday(ds));
+    const workDays=days.filter(ds=>isWorkday(ds));
+    const prevDate=ds=>{const d=parseDate(ds);d.setDate(d.getDate()-1);return fmt(d.getFullYear(),d.getMonth()+1,d.getDate());};
+    const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+    const OPD1_STEALABLE=['opd3_am','opd3_pm','opd2_am','opd2_pm','opd1_pm','ncd_am','clinic_am','pcu_am','pcu_full'];
+    const opd1Protected=new Set(['ward','off_am','er_day','psychiatry_am','geriatric_am','palliative_pm',
+      'acupuncture_pm','dm_remission_pm','telemedicine_pm']);
+    const clearKeys=(s,id,keys)=>{for(const k of keys){if(s[k]===id)s[k]=null;}};
+    const countStats=()=>{
+      const c={};
+      ids.forEach(id=>c[id]={ward_24:0,er_night:0,er_24:0,er_day:0,holiday_total:0,total:0});
+      for(const ds of days){
+        const s=ns[ds]||{};
+        if(idSet.has(s.ward_24))c[s.ward_24].ward_24++;
+        if(idSet.has(s.er_night))c[s.er_night].er_night++;
+        if(idSet.has(s.er_24))c[s.er_24].er_24++;
+        if(idSet.has(s.er_day))c[s.er_day].er_day++;
+      }
+      ids.forEach(id=>{
+        c[id].holiday_total=c[id].ward_24+c[id].er_24;
+        c[id].total=c[id].holiday_total+c[id].er_night;
+      });
+      return c;
+    };
+    const rangeOk=(c,key)=>{
+      const vals=ids.map(id=>c[id][key]||0);
+      return Math.max(...vals)-Math.min(...vals)<=1;
+    };
+    const allBalanced=c=>rangeOk(c,'ward_24')&&rangeOk(c,'er_night')&&rangeOk(c,'er_24')&&rangeOk(c,'er_day')&&rangeOk(c,'holiday_total')&&rangeOk(c,'total');
+    const cumulativeErDayOk=c=>{
+      const vals=ids.map(id=>(wlErDay[id]||0)+(c[id].er_day||0));
+      return Math.max(...vals)-Math.min(...vals)<=1;
+    };
+    const nextWardIdForHoliday=ds=>{
+      const nds=nextWorkdayForHoliday(ds);
+      return nds?(ns[nds]?.ward||ww[getWeekKey(nds)]||null):null;
+    };
+    const canWard24=(id,ds)=>{
+      if(fixedHolidaySlotId(ds,'ward'))return false;
+      const s=ns[ds]||(ns[ds]={});
+      if(s.er_24===id)return false;
+      const lv=getDoctorLeave(id,ds);
+      if(lv==='full')return false;
+      if(hasMeetingNextDay(id,ds))return false;
+      if(hasDoctorConstraint(id,ds,'no_oncall'))return false;
+      if(nextWardIdForHoliday(ds)===id)return false;
+      return true;
+    };
+    const canEr24=(id,ds)=>{
+      if(fixedHolidaySlotId(ds,'er'))return false;
+      const s=ns[ds]||(ns[ds]={});
+      const pds=prevDate(ds),nds=nextDateStr(ds);
+      const prevHolidayEr=!isWorkday(pds)?(ns[pds]?.er_24||state.schedule[pds]?.er_24||null):null;
+      const nextHolidayEr=!isWorkday(nds)?(ns[nds]?.er_24||state.schedule[nds]?.er_24||null):null;
+      const prevWork=previousWorkdayForHoliday(ds);
+      const prevWorkEr=prevWork?(ns[prevWork]?.er_night||state.schedule[prevWork]?.er_night||null):null;
+      if(s.ward_24===id||prevHolidayEr===id||nextHolidayEr===id||prevWorkEr===id)return false;
+      if(nextWardIdForHoliday(ds)===id)return false;
+      const lv=getDoctorLeave(id,ds);
+      if(lv==='full')return false;
+      if(hasMeetingNextDay(id,ds))return false;
+      if(hasDoctorConstraint(id,ds,'no_oncall'))return false;
+      return true;
+    };
+    const canErDay=(id,ds)=>{
+      if(!isWorkday(ds))return false;
+      const s=ns[ds]||(ns[ds]={});
+      const lv=getDoctorLeave(id,ds);
+      if(lv)return false;
+      if(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_pm'))return false;
+      if(s.ward===id||s.off_am===id||s.opd1_am===id||s.er_night===id)return false;
+      return canAssignDoctorToSlot(id,'er_day',ds);
+    };
+    const holidayErReplacementForBalance=(currentId,holidayDs,plannedWorkDs=null,plannedErId=null)=>{
+      const hs=ns[holidayDs];
+      if(!hs||hs.er_24!==currentId)return null;
+      const planned=plannedWorkDs?ns[plannedWorkDs]:null;
+      const before=planned?{opd1_am:planned.opd1_am,er_night:planned.er_night}:null;
+      if(planned){planned.opd1_am=plannedErId;planned.er_night=plannedErId;}
+      const pool=rdocs.filter(d=>d.id!==currentId&&canEr24(d.id,holidayDs));
+      if(planned&&before){planned.opd1_am=before.opd1_am;planned.er_night=before.er_night;}
+      if(!pool.length)return null;
+      const c=countStats();
+      const minEr=Math.min(...pool.map(d=>c[d.id].er_24||0));
+      const p1=pool.filter(d=>(c[d.id].er_24||0)===minEr);
+      const minTotal=Math.min(...p1.map(d=>c[d.id].total||0));
+      return shuffle(p1.filter(d=>(c[d.id].total||0)===minTotal))[0]||null;
+    };
+    const moveNextHolidayErForBalance=(id,ds)=>{
+      const nds=nextDateStr(ds);
+      if(isWorkday(nds)||ns[nds]?.er_24!==id)return true;
+      const replacement=holidayErReplacementForBalance(id,nds,ds,id);
+      if(!replacement)return false;
+      ns[nds].er_24=replacement.id;
+      return true;
+    };
+    const canErNight=(id,ds,allowHolidayMove=false)=>{
+      const s=ns[ds]||(ns[ds]={});
+      if(!canAssignDoctorToSlot(id,'opd1_am',ds))return false;
+      const lv=getDoctorLeave(id,ds);
+      if(lv==='full'||lv==='meeting'||lv==='half_am')return false;
+      if(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_oncall'))return false;
+      if(hasMeetingNextDay(id,ds))return false;
+      if(s.ward===id||s.off_am===id||s.er_day===id)return false;
+      const nextWorkday=nextWorkdayForHoliday(ds);
+      const nextWardId=nextWorkday?ww[getWeekKey(nextWorkday)]:null;
+      if(nextWardId&&nextWardId!==ww[getWeekKey(ds)]&&id===nextWardId)return false;
+      const nds=nextDateStr(ds);
+      if(!isWorkday(nds)&&(ns[nds]?.er_24||state.schedule[nds]?.er_24)===id&&
+        !(allowHolidayMove&&holidayErReplacementForBalance(id,nds,ds,id)))return false;
+      for(const k of heldKeys(s,id)){
+        if(k==='opd1_am'||k==='er_night')continue;
+        if(opd1Protected.has(k))return false;
+        if(k==='opd1_am'||k==='er_night'||k==='er_day')return false;
+        if(!OPD1_STEALABLE.includes(k))return false;
+      }
+      return true;
+    };
+    const datesFor=(key,fromId)=>days.filter(ds=>{
+      const s=ns[ds]||{};
+      if(key==='ward_24')return !isWorkday(ds)&&s.ward_24===fromId&&!fixedHolidaySlotId(ds,'ward');
+      if(key==='er_24')return !isWorkday(ds)&&s.er_24===fromId&&!fixedHolidaySlotId(ds,'er');
+      if(key==='er_day')return isWorkday(ds)&&s.er_day===fromId;
+      return isWorkday(ds)&&s.er_night===fromId&&s.opd1_am===fromId;
+    });
+    const canAssign=(key,id,ds)=>key==='ward_24'?canWard24(id,ds):key==='er_24'?canEr24(id,ds):key==='er_day'?canErDay(id,ds):canErNight(id,ds,true);
+    const assign=(key,id,ds)=>{
+      const s=ns[ds]||(ns[ds]={});
+      if(key==='ward_24'){s.ward_24=id;return true;}
+      if(key==='er_24'){s.er_24=id;return true;}
+      if(key==='er_day'){s.er_day=id;return true;}
+      if(!moveNextHolidayErForBalance(id,ds))return false;
+      clearKeys(s,id,OPD1_STEALABLE);
+      s.opd1_am=id;s.er_night=id;
+      return true;
+    };
+    const tryRebuildHolidayDuties=()=>{
+      const backup=offDays.map(ds=>({ds,data:{...(ns[ds]||{})}}));
+      const erFixed={},wardFixed={};
+      for(const ds of offDays){
+        erFixed[ds]=fixedHolidaySlotId(ds,'er')||null;
+        wardFixed[ds]=fixedHolidaySlotId(ds,'ward')||null;
+        ns[ds]=ns[ds]||{};
+        ns[ds].er_24=erFixed[ds];
+        ns[ds].ward_24=wardFixed[ds];
+      }
+      const c={};
+      ids.forEach(id=>c[id]={ward_24:0,er_24:0,holiday_total:0});
+      let erSlots=0,wardSlots=0,holidaySlots=0;
+      for(const ds of offDays){
+        if(!erFixed[ds]||idSet.has(erFixed[ds]))erSlots++;
+        if(!wardFixed[ds]||idSet.has(wardFixed[ds]))wardSlots++;
+        if(idSet.has(erFixed[ds])){c[erFixed[ds]].er_24++;c[erFixed[ds]].holiday_total++;}
+        if(idSet.has(wardFixed[ds])){c[wardFixed[ds]].ward_24++;c[wardFixed[ds]].holiday_total++;}
+      }
+      holidaySlots=erSlots+wardSlots;
+      const rangeLocal=key=>{
+        const vals=ids.map(id=>c[id][key]||0);
+        return Math.max(...vals)-Math.min(...vals);
+      };
+      const okFinal=()=>rangeLocal('ward_24')<=1&&rangeLocal('er_24')<=1&&rangeLocal('holiday_total')<=1;
+      const restore=()=>{for(const b of backup)ns[b.ds]=b.data;};
+      for(const ds of offDays){
+        const s=ns[ds];
+        if(!s.er_24){
+          const erPool=ids.filter(id=>canEr24(id,ds)).sort((a,b)=>
+            c[a].er_24-c[b].er_24||c[a].holiday_total-c[b].holiday_total
+          );
+          const erId=shuffle(erPool.filter(id=>c[id].er_24===c[erPool[0]]?.er_24))[0]||erPool[0]||null;
+          if(erId){s.er_24=erId;c[erId].er_24++;c[erId].holiday_total++;}
+        }
+        if(!s.ward_24){
+          const wardPool=ids.filter(id=>id!==s.er_24&&canWard24(id,ds)).sort((a,b)=>
+            c[a].ward_24-c[b].ward_24||c[a].holiday_total-c[b].holiday_total
+          );
+          const wardId=shuffle(wardPool.filter(id=>c[id].ward_24===c[wardPool[0]]?.ward_24))[0]||wardPool[0]||null;
+          if(wardId){s.ward_24=wardId;c[wardId].ward_24++;c[wardId].holiday_total++;}
+        }
+      }
+      if(okFinal())return true;
+      restore();
+      return false;
+    };
+    const tryMove=(key,fromId,toId)=>{
+      for(const ds of shuffle(datesFor(key,fromId))){
+        if(!canAssign(key,toId,ds))continue;
+        if(assign(key,toId,ds))return true;
+      }
+      return false;
+    };
+    const tryReplaceFixedErNight=(toId)=>{
+      for(const ds of shuffle(workDays)){
+        const s=ns[ds]||{};
+        if(!s.er_night||idSet.has(s.er_night))continue;
+        if(!canAssign('er_night',toId,ds))continue;
+        s.opd1_am=null;s.er_night=null;
+        if(assign('er_night',toId,ds))return true;
+      }
+      return false;
+    };
+    const balanceScore=c=>{
+      let score=0;
+      for(const key of ['ward_24','er_night','er_24','er_day','holiday_total','total']){
+        const vals=ids.map(id=>c[id][key]||0);
+        const r=Math.max(...vals)-Math.min(...vals);
+        if(r>1)score+=(r-1)*(key==='total'||key==='holiday_total'?1000:700);
+        score+=r;
+      }
+      {const cvals=ids.map(id=>(wlErDay[id]||0)+(c[id].er_day||0));const cr=Math.max(...cvals)-Math.min(...cvals);if(cr>1)score+=(cr-1)*700;score+=cr;}
+      return score;
+    };
+    const generateMoves=()=>{
+      const moves=[];
+      for(const key of ['ward_24','er_night','er_24','er_day']){
+        const dlist=(key==='er_night'||key==='er_day')?workDays:offDays;
+        for(const ds of dlist){
+          const s=ns[ds]||{};
+          const fromId=key==='ward_24'?s.ward_24:key==='er_24'?s.er_24:key==='er_day'?s.er_day:s.er_night;
+          if(key==='ward_24'&&fixedHolidaySlotId(ds,'ward'))continue;
+          if(key==='er_24'&&fixedHolidaySlotId(ds,'er'))continue;
+          if(!fromId)continue;
+          for(const toId of ids){
+            if(toId===fromId)continue;
+            if(canAssign(key,toId,ds))moves.push({key,ds,toId});
+          }
+        }
+      }
+      return shuffle(moves);
+    };
+    const applyMove=m=>{
+      const touched=new Set([m.ds]);
+      const nds=nextDateStr(m.ds);
+      if(m.key==='er_night'&&!isWorkday(nds))touched.add(nds);
+      const before=[...touched].map(ds=>({ds,data:{...(ns[ds]||{})}}));
+      const prevErDayId=m.key==='er_day'?(ns[m.ds]||{}).er_day:null;
+      if(!assign(m.key,m.toId,m.ds))return null;
+      if(m.key==='er_day'){if(prevErDayId&&wlErDay[prevErDayId]!==undefined)wlErDay[prevErDayId]--;wlErDay[m.toId]=(wlErDay[m.toId]||0)+1;}
+      return before;
+    };
+    const undoMove=(before,key,prevId,newId)=>{for(const b of before)ns[b.ds]=b.data;if(key==='er_day'&&prevId!==undefined&&newId!==undefined){if(newId&&wlErDay[newId]!==undefined)wlErDay[newId]--;if(prevId&&wlErDay[prevId]!==undefined)wlErDay[prevId]++;}};
+    const candidateMoves=(key,fromId,toId)=>shuffle(datesFor(key,fromId).map(ds=>({key,ds,toId}))).filter(m=>canAssign(m.key,m.toId,m.ds));
+    const tryMoveSequence=(moves,baseScore)=>{
+      const applied=[];
+      const moveLog=[];
+      for(const m of moves){
+        if(!canAssign(m.key,m.toId,m.ds)){for(let i=applied.length-1;i>=0;i--)undoMove(applied[i],moveLog[i]?.key,moveLog[i]?.newId,moveLog[i]?.prevId);return false;}
+        const prevId=m.key==='er_day'?(ns[m.ds]||{}).er_day:null;
+        const b=applyMove(m);
+        if(!b){for(let i=applied.length-1;i>=0;i--)undoMove(applied[i],moveLog[i]?.key,moveLog[i]?.newId,moveLog[i]?.prevId);return false;}
+        applied.push(b);moveLog.push({key:m.key,prevId,newId:m.toId});
+      }
+      const c=countStats();
+      if((allBalanced(c)&&cumulativeErDayOk(c))||balanceScore(c)<baseScore)return true;
+      for(let i=applied.length-1;i>=0;i--)undoMove(applied[i],moveLog[i]?.key,moveLog[i]?.newId,moveLog[i]?.prevId);
+      return false;
+    };
+    const tryCompositeErNightBalance=c=>{
+      const base=balanceScore(c);
+      const erVals=ids.map(id=>c[id].er_night);
+      const max=Math.max(...erVals),min=Math.min(...erVals);
+      if(max-min<=1)return false;
+      const tryWithComp=(erMoves,fromId,toId)=>{
+        const afterErOnlyScore=base;
+        if(tryMoveSequence(erMoves,afterErOnlyScore))return true;
+        const compKeys=['ward_24','er_24'].filter(k=>c[toId][k]>c[fromId][k]);
+        for(const compKey of shuffle(compKeys)){
+          for(const comp of candidateMoves(compKey,toId,fromId).slice(0,40)){
+            if(tryMoveSequence([...erMoves,comp],base))return true;
+            if(tryMoveSequence([comp,...erMoves],base))return true;
+          }
+        }
+        return false;
+      };
+      for(const fromId of shuffle(ids.filter(id=>c[id].er_night===max))){
+        for(const toId of shuffle(ids.filter(id=>c[id].er_night===min))){
+          for(const direct of candidateMoves('er_night',fromId,toId).slice(0,40)){
+            if(tryWithComp([direct],fromId,toId))return true;
+          }
+          for(const midId of shuffle(ids.filter(id=>id!==fromId&&id!==toId))){
+            for(const first of candidateMoves('er_night',fromId,midId).slice(0,30)){
+              const b1=applyMove(first);
+              if(!b1)continue;
+              const seconds=candidateMoves('er_night',midId,toId).slice(0,30);
+              undoMove(b1);
+              for(const second of seconds){
+                if(tryWithComp([first,second],fromId,toId))return true;
+              }
+            }
+          }
+        }
+      }
+      return false;
+    };
+    const tryCompositeHolidayBalance=c=>{
+      const base=balanceScore(c);
+      for(const primaryKey of ['er_24','ward_24']){
+        const vals=ids.map(id=>c[id][primaryKey]);
+        const max=Math.max(...vals),min=Math.min(...vals);
+        if(max-min<=1)continue;
+        for(const fromId of shuffle(ids.filter(id=>c[id][primaryKey]===max))){
+          for(const toId of shuffle(ids.filter(id=>c[id][primaryKey]===min))){
+            for(const primary of candidateMoves(primaryKey,fromId,toId).slice(0,60)){
+              if(tryMoveSequence([primary],base))return true;
+              for(const compKey of shuffle(['er_night','ward_24','er_24'].filter(k=>k!==primaryKey&&c[toId][k]>c[fromId][k]))){
+                for(const comp of candidateMoves(compKey,toId,fromId).slice(0,60)){
+                  if(tryMoveSequence([primary,comp],base)||tryMoveSequence([comp,primary],base))return true;
+                }
+              }
+            }
+          }
+        }
+      }
+      return false;
+    };
+    const trySearchMove=baseScore=>{
+      const moves1=generateMoves().slice(0,80);
+      for(const m1 of moves1){
+        const b1=applyMove(m1);
+        if(!b1)continue;
+        if(balanceScore(countStats())<baseScore)return true;
+        const moves2=generateMoves().slice(0,60);
+        for(const m2 of moves2){
+          const b2=applyMove(m2);
+          if(!b2)continue;
+          if(balanceScore(countStats())<baseScore)return true;
+          undoMove(b2);
+        }
+        undoMove(b1);
+      }
+      return false;
+    };
+    tryRebuildHolidayDuties();
+    for(let iter=0;iter<80;iter++){
+      const c=countStats();
+      if(allBalanced(c)&&cumulativeErDayOk(c))return true;
+      let moved=false;
+      for(const key of ['er_day','ward_24','er_night','er_24']){
+        const vals=ids.map(id=>c[id][key]);
+        const max=Math.max(...vals),min=Math.min(...vals);
+        if(max-min<=1)continue;
+        for(const fromId of shuffle(ids.filter(id=>c[id][key]===max))){
+          for(const toId of shuffle(ids.filter(id=>c[id][key]===min))){
+            if(tryMove(key,fromId,toId)){moved=true;break;}
+          }
+          if(moved)break;
+        }
+        if(moved)break;
+      }
+      if(moved)continue;
+      const holidayTotals=ids.map(id=>c[id].holiday_total);
+      const maxH=Math.max(...holidayTotals),minH=Math.min(...holidayTotals);
+      if(maxH-minH>1){
+        for(const fromId of shuffle(ids.filter(id=>c[id].holiday_total===maxH))){
+          for(const toId of shuffle(ids.filter(id=>c[id].holiday_total===minH))){
+            for(const key of ['ward_24','er_24'].filter(k=>c[fromId][k]>c[toId][k])){
+              if(tryMove(key,fromId,toId)){moved=true;break;}
+            }
+            if(moved)break;
+          }
+          if(moved)break;
+        }
+      }
+      if(moved)continue;
+      const totals=ids.map(id=>c[id].total);
+      const maxT=Math.max(...totals),minT=Math.min(...totals);
+      if(maxT-minT>1){
+        for(const fromId of shuffle(ids.filter(id=>c[id].total===maxT))){
+          for(const toId of shuffle(ids.filter(id=>c[id].total===minT))){
+            for(const key of ['ward_24','er_night','er_24'].filter(k=>c[fromId][k]>c[toId][k])){
+              if(tryMove(key,fromId,toId)){moved=true;break;}
+            }
+            if(moved)break;
+          }
+          if(moved)break;
+        }
+      }
+      if(moved)continue;
+      if(tryCompositeHolidayBalance(c))continue;
+      if(tryCompositeErNightBalance(c))continue;
+      const erVals=ids.map(id=>c[id].er_night);
+      const erMin=Math.min(...erVals);
+      for(const toId of shuffle(ids.filter(id=>c[id].er_night===erMin))){
+        if(tryReplaceFixedErNight(toId)){moved=true;break;}
+      }
+      if(!moved&&trySearchMove(balanceScore(c)))moved=true;
+      if(!moved)break;
+    }
+    return allBalanced(countStats())&&cumulativeErDayOk(countStats());
+  };
+
+  // WARD per week: เรียงลำดับตามที่กำหนด (จีรวัฒน์>ณัฐพนธ์>ปัถย์>จิดาภา>ศุภชลี>สุพิชชา>วีรยา)
+  {
+    const wardSeq=[];const wardSeqSet=new Set();
+    for(const name of WARD_PREF_NAMES){
+      const d=rdocs.find(d=>d.name.includes(name));
+      if(d&&!wardSeqSet.has(d.id)){wardSeq.push(d.id);wardSeqSet.add(d.id);}
+    }
+    for(const d of rdocs){if(!wardSeqSet.has(d.id)){wardSeq.push(d.id);wardSeqSet.add(d.id);}}
+    if(!wardSeq.length){state.wardWeeks=ww;}
+    else{
+      const prevAssignedWardIds=new Set(
+        Object.entries(ww).filter(([wk])=>parseDate(wk)<firstDay).map(([,id])=>id).filter(Boolean)
+      );
+      const newExtraDocs=rdocs.filter(d=>
+        !WARD_PREF_NAMES.some(n=>d.name.includes(n))&&!prevAssignedWardIds.has(d.id)
+      );
+      const newExtraDocIds=new Set(newExtraDocs.map(d=>d.id));
+      const prevWksSorted=Object.keys(ww).filter(wk=>parseDate(wk)<firstDay).sort().reverse();
+      const lastWardId=prevWksSorted.length?ww[prevWksSorted[0]]:null;
+      let rotStart=0;
+      if(lastWardId!=null){const idx=wardSeq.indexOf(lastWardId);if(idx>=0)rotStart=(idx+1)%wardSeq.length;}
+      const rotQueue=[...newExtraDocs.map(d=>d.id)];
+      for(let pass=0;pass<3;pass++){
+        for(let i=0;i<wardSeq.length;i++){
+          const id=wardSeq[(rotStart+i)%wardSeq.length];
+          if(!newExtraDocIds.has(id))rotQueue.push(id);
+        }
+      }
+      const wkdayMap={};
+      for(const ds of days){if(!isWorkday(ds))continue;const wk=getWeekKey(ds);if(!wkdayMap[wk])wkdayMap[wk]=[];wkdayMap[wk].push(ds);}
+      const sortedWks=Object.keys(wkdayMap).sort();
+      const assignedWardMonth=new Set();let rotQueueIdx=0;
+      for(const wk of sortedWks){
+        const weekStart=parseDate(wk);
+        const carriedWardId=weekStart<firstDay?ww[wk]:null;
+        if(carriedWardId&&rdocs.some(d=>d.id===carriedWardId)){
+          assignedWardMonth.add(carriedWardId);mWard[carriedWardId]=(mWard[carriedWardId]||0)+1;wlWard[carriedWardId]=(wlWard[carriedWardId]||0)+1;wlWardTotal[carriedWardId]=(wlWardTotal[carriedWardId]||0)+1;continue;
+        }
+        delete ww[wk];
+        let found=null;
+        while(rotQueueIdx<rotQueue.length&&!found){const cid=rotQueue[rotQueueIdx++];if(rdocs.some(d=>d.id===cid)&&!assignedWardMonth.has(cid))found=cid;}
+        if(!found){for(let i=0;i<wardSeq.length;i++){const cid=wardSeq[(rotStart+i)%wardSeq.length];if(rdocs.some(d=>d.id===cid)){found=cid;break;}}}
+        if(found){ww[wk]=found;assignedWardMonth.add(found);mWard[found]=(mWard[found]||0)+1;wlWard[found]=(wlWard[found]||0)+1;wlWardTotal[found]=(wlWardTotal[found]||0)+1;}
+      }
+      const wardBlockedOnWeek=(id,wk)=>{
+        if(!id)return true;
+        return (wkdayMap[wk]||[]).some(ds=>
+          !!getDoctorLeave(id,ds)||hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_pm')
+        );
+      };
+      for(let pass=0;pass<sortedWks.length;pass++){
+        let swapped=false;
+        for(const wk of sortedWks){
+          const id=ww[wk];
+          if(!wardBlockedOnWeek(id,wk))continue;
+          for(const swapWk of sortedWks){
+            if(swapWk===wk)continue;
+            const swapId=ww[swapWk];
+            if(!swapId||swapId===id)continue;
+            if(!wardBlockedOnWeek(swapId,wk)&&!wardBlockedOnWeek(id,swapWk)){
+              ww[wk]=swapId;
+              ww[swapWk]=id;
+              swapped=true;
+              break;
+            }
+          }
+          if(swapped)break;
+        }
+        if(!swapped)break;
+      }
+    }
+  }
+  state.wardWeeks=ww;
+  for(const ds of days)ns[ds]={};
+
+  // Fixed on-call
+  for(const[did,dm] of Object.entries(state.fixedOncall)){
+    const docId=parseInt(did);
+    for(const[ds,slot] of Object.entries(dm)){
+      if(!ns[ds])continue;
+      if(slot==='ward')ns[ds].ward_24=docId;
+      else if(slot==='er')ns[ds].er_24=docId;
+    }
+  }
+
+  // Off days: เฉลี่ย er_24/ward_24 อิงประวัติ + ห้าม ER วันหยุด 2 วันติดกัน
+  const beforeFirst=new Date(firstDay);beforeFirst.setDate(firstDay.getDate()-1);
+  const beforeFirstDs=fmt(beforeFirst.getFullYear(),beforeFirst.getMonth()+1,beforeFirst.getDate());
+  let prevOffEr24=!isWorkday(beforeFirstDs)?state.schedule[beforeFirstDs]?.er_24||null:null; // ติดตาม er_24 วันหยุดก่อนหน้า
+  for(const ds of days){
+    if(isWorkday(ds)){prevOffEr24=null;continue;}
+    const excl=new Set([ns[ds].er_24,ns[ds].ward_24].filter(Boolean));
+    // ห้ามแพทย์ที่อยู่ ER วันหยุดวันก่อนหน้ามาอยู่ซ้ำ
+    if(prevOffEr24)excl.add(prevOffEr24);
+    // ห้ามแพทย์ที่ทำ ER นอกเวลา (16:30-08:30) วันทำการก่อนหน้ามาต่อด้วย ER วันหยุด (08:30-08:30) ทันที
+    // เพราะจะทำงาน ER ต่อเนื่องเกิน 24 ชั่วโมง
+    {let pwdIdx=days.indexOf(ds)-1;
+     while(pwdIdx>=0&&!isWorkday(days[pwdIdx]))pwdIdx--;
+     if(pwdIdx>=0){const prevErN=ns[days[pwdIdx]]?.er_night||null;if(prevErN)excl.add(prevErN);}}
+    let nextWardId=null;
+    // ห้าม WARD doctor ของ workday ถัดไปทำ ER วันหยุด (จะ OFF วันแรกสัปดาห์ตัวเอง)
+    {let nwd=null;for(let i=days.indexOf(ds)+1;i<days.length;i++){if(isWorkday(days[i])){nwd=days[i];break;}}
+     nextWardId=nwd?ww[getWeekKey(nwd)]:null;if(nextWardId)excl.add(nextWardId);}
+    const av=rdocs.filter(d=>{
+      const lv=getDoctorLeave(d.id,ds);
+      if(lv==='full')return false;
+      if(hasMeetingNextDay(d.id,ds))return false;
+      if(nextWardId&&d.id===nextWardId)return false;
+      if(hasDoctorConstraint(d.id,ds,'no_oncall'))return false;
+      return true;
+    });
+    // er_24: เฉลี่ย ER วันหยุดรายเดือนก่อน และห้าม ER วันหยุดติดกันเด็ดขาด
+    if(!ns[ds].er_24){
+      // รอบ 1: มี excl เต็ม
+      const fairEr24=fairMonthlyPool(av,mEr24);
+      let p=pickBal(fairEr24,excl,mEr24,mHoliday24,mErOncall);
+      // รอบ 2: ถ้าคนกลุ่มยอดน้อยสุดติดข้อห้ามทั้งหมด ให้ขยาย pool โดยยังคงข้อห้ามหลักทั้งหมดไว้
+      if(!p){p=pickBal(av,excl,mEr24,mHoliday24,mErOncall);}
+      // ไม่มีการผ่อนข้อห้ามหลัก: ไม่ให้ ER วันหยุดติดกัน, ไม่ให้ชน ER คืนก่อนหน้า, ไม่ให้ชน WARD วันถัดไป
+      ns[ds].er_24=p?.id||null;if(p){excl.add(p.id);mEr24[p.id]++;mHoliday24[p.id]++;mErOncall[p.id]++;wlEr24[p.id]++;}
+    }
+    prevOffEr24=ns[ds].er_24; // บันทึกสำหรับวันถัดไป
+    // ward_24: เฉลี่ย WARD วันหยุดรายเดือนก่อน แล้วค่อยดู WARD สะสม
+    if(!ns[ds].ward_24){
+      const fairWard24=fairMonthlyPool(av,mWard24);
+      let p=pickBal(fairWard24,excl,mWard24,mHoliday24,wlWardTotal);
+      if(!p){const excl2=new Set([ns[ds].er_24,ns[ds].ward_24].filter(Boolean));p=pickBal(fairWard24,excl2,mWard24,mHoliday24,wlWardTotal);}
+      ns[ds].ward_24=p?.id||null;if(p){excl.add(p.id);mWard24[p.id]++;mHoliday24[p.id]++;wlWard24[p.id]++;wlWardTotal[p.id]++;}
+    }
+  }
+
+  // Re-balance holiday ER before workdays so the next workday OFF AM follows the repaired ER owner.
+  repairHolidayEr24();
+
+  const pasawat =getDoctorByName('พศวัต');
+  const ingtawan=getDoctorByName('อิงตะวัน');
+  const piyarat =getDoctorByName('ปิยารัตน์');
+  const prasert =getDoctorByName('ประเสริฐ');
+  const patth   =getDoctorByName('ปัถย์');
+
+  for(const ds of days){
+    if(!isWorkday(ds))continue;
+    const d=parseDate(ds);const dow=d.getDay();const wk=getWeekKey(ds);
+    const s=ns[ds];
+    const usedAM=new Set(),usedPM=new Set();
+
+    // [1] OFF AM: จากเวรคืนวันก่อน (รองรับข้ามเดือน)
+    const dayIdx=days.indexOf(ds);
+    let prevSched=null;
+    if(dayIdx>0){
+      prevSched=ns[days[dayIdx-1]]||{};
+    } else {
+      // วันที่ 1: ดูตารางเดือนก่อน
+      const pm=month===1?12:month-1,py=month===1?year-1:year;
+      const lastDay=getDaysInMonth(py,pm).slice(-1)[0];
+      prevSched=state.schedule[lastDay]||{};
+    }
+    {const offCand=prevSched.er_night||prevSched.er_24||null;
+     if(offCand&&getDoctorById(offCand)){s.off_am=offCand;usedAM.add(offCand);}}
+
+    // [2] WARD: block ทั้งเช้า-บ่าย (งดวันที่ลาเต็มวัน/ลาประชุม)
+    s.ward=ww[wk]||null;
+    if(s.ward){
+      const wardLv=getDoctorLeave(s.ward,ds);
+      if(wardLv||hasDoctorConstraint(s.ward,ds,'no_am')||hasDoctorConstraint(s.ward,ds,'no_pm'))s.ward=null;
+    }
+    // OFF AM มีลำดับความสำคัญสูงกว่า WARD: ถ้าแพทย์คนเดียวกัน ให้ยกเลิก WARD วันนั้น
+    if(s.ward&&s.off_am&&s.ward===s.off_am)s.ward=null;
+    if(s.ward){usedAM.add(s.ward);usedPM.add(s.ward);}
+    if(s.off_am){
+      const offLv=getDoctorLeave(s.off_am,ds);
+      if(offLv==='full'||offLv==='meeting'||offLv==='half_am'){
+        s.off_am=null;
+      }
+    }
+
+    // Pools
+    const availAll=rdocs.filter(d=>{const lv=getDoctorLeave(d.id,ds);return lv!=='full'&&lv!=='meeting';});
+    const availAM =rdocs.filter(d=>{
+      const lv=getDoctorLeave(d.id,ds);
+      if(lv==='full'||lv==='meeting'||lv==='half_am')return false;
+      if(hasDoctorConstraint(d.id,ds,'no_am'))return false;
+      return true;
+    });
+    const availPM=rdocs.filter(d=>{
+      const lv=getDoctorLeave(d.id,ds);
+      if(lv==='full'||lv==='meeting'||lv==='half_pm')return false;
+      if(hasDoctorConstraint(d.id,ds,'no_pm'))return false;
+      return true;
+    });
+
+    // [PRE-BLOCK] วันพุธ: ล็อก patth ไว้สำหรับจิตเวช ก่อนสุ่ม ER
+    // เพื่อไม่ให้ ER ดึง patth ไปก่อน (patth จะถูก assign จิตเวชภายหลัง)
+    const patthLockedForPsychiatry = patth&&patth.status==='active'&&dow===3&&
+      patth.cond_psychiatry&&ww[wk]!==patth.id&&
+      (()=>{const lv=getDoctorLeave(patth.id,ds);return !lv||lv==='half_pm';})();
+    if(patthLockedForPsychiatry) usedAM.add(patth.id);
+
+    // [3] ER ในเวลา: monthly fairPool → cumulative tiebreak, block PM
+    // [กฎใหม่] ER ในเวลาของแพทย์แต่ละคนต้องห่างกันไม่เกิน 1 ตอนสุ่ม
+    //   → เลือกได้เฉพาะแพทย์ที่ mErDay ต่ำสุด (fairMonthlyPool คืนเฉพาะแพทย์ที่ counter = ค่าต่ำสุด)
+    //   → ถ้าวันนั้นไม่มีแพทย์ mErDay ต่ำสุดที่ว่างเลย ปล่อย er_day=null ก่อน
+    //     ให้ขั้นตอน chooseRequired (กันช่องว่าง) + enforceRandomErDayBalance (rebalance) จัดการต่อ
+    //   ทำให้กฎเดิมทุกข้อยังครบ และระยะห่างระหว่างแพทย์ในขั้นสุ่มไม่เกิน 1
+    {
+      const erDayPool=rdocs.filter(d=>{
+        const lv=getDoctorLeave(d.id,ds);
+        if(lv)return false;
+        if(usedAM.has(d.id)||usedPM.has(d.id))return false;
+        if(hasDoctorConstraint(d.id,ds,'no_am')||hasDoctorConstraint(d.id,ds,'no_pm'))return false;
+        return canAssignDoctorToSlot(d.id,'er_day',ds);
+      });
+      const erDayFair=fairMonthlyPool(erDayPool,mErDay);
+      const p=erDayFair.length?pickBal(erDayFair,new Set(),mErDay,wlErDay):null;
+      s.er_day=p?.id||null;
+      if(p){usedAM.add(p.id);usedPM.add(p.id);mErDay[p.id]++;wlErDay[p.id]++;}
+    }
+
+    // [4] OPD1 AM = ER นอกเวลา: เฉลี่ยอิงประวัติ, block PM
+    // ห้าม WARD doctor ของสัปดาห์ถัดไปทำ ER คืน (จะ OFF วันแรกสัปดาห์ตัวเอง)
+    {
+      let nextWorkday=null;
+      for(let i=dayIdx+1;i<days.length;i++){if(isWorkday(days[i])){nextWorkday=days[i];break;}}
+      const nextWardId=nextWorkday?ww[getWeekKey(nextWorkday)]:null;
+      const erNightExcl=new Set([...usedAM]);
+      if(nextWardId&&nextWardId!==ww[wk])erNightExcl.add(nextWardId);
+      {const nds=nextDateStr(ds);if(!isWorkday(nds)&&ns[nds]?.er_24)erNightExcl.add(ns[nds].er_24);}
+      const pool=fairMonthlyPool(availAM.filter(d=>!hasDoctorConstraint(d.id,ds,'no_oncall')&&!hasMeetingNextDay(d.id,ds)),mErNight);
+      // เฉลี่ย ER นอกเวลาในเดือนนี้ก่อน แล้วค่อยดูเวรนอกเวลารวมและสถิติสะสม
+      const p=pickBal(pool,erNightExcl,mErNight,mErOncall,wlErNight);
+      s.opd1_am=p?.id||null;s.er_night=p?.id||null;
+      if(p){usedAM.add(p.id);usedPM.add(p.id);mErNight[p.id]++;mErOncall[p.id]++;wlErNight[p.id]++;}
+    }
+
+    // Fixed doctors
+    if(pasawat&&pasawat.status==='active'){
+      const lv=getDoctorLeave(pasawat.id,ds);
+      if(!lv){
+        if(dow>=1&&dow<=4){s.ncd_am=pasawat.id;usedAM.add(pasawat.id);}
+        if(dow===5){s.geriatric_am=pasawat.id;s.dm_remission_pm=pasawat.id;usedAM.add(pasawat.id);usedPM.add(pasawat.id);}
+        if(dow===2){s.telemedicine_pm=pasawat.id;usedPM.add(pasawat.id);}
+        if([1,3,4].includes(dow)){s.acupuncture_pm=pasawat.id;usedPM.add(pasawat.id);}
+      }
+    }
+    if(ingtawan&&ingtawan.status==='active'){
+      const lv=getDoctorLeave(ingtawan.id,ds);
+      if(!lv){
+        if(dow===1){s.telemedicine_pm=ingtawan.id;usedPM.add(ingtawan.id);}
+        if(dow===3){s.clinic_am=ingtawan.id;s.opd1_pm=ingtawan.id;usedAM.add(ingtawan.id);usedPM.add(ingtawan.id);}
+        if(dow===4){s.palliative_pm=ingtawan.id;usedPM.add(ingtawan.id);}
+      }
+    }
+    if(piyarat&&piyarat.status==='active'&&dow===5&&!getDoctorLeave(piyarat.id,ds)){s.clinic_am=piyarat.id;usedAM.add(piyarat.id);}
+    if(prasert&&prasert.status==='active'&&dow===4&&!getDoctorLeave(prasert.id,ds)){s.clinic_am=prasert.id;usedAM.add(prasert.id);}
+    if(dow===1||dow===4){
+      const canUseIngtawan=ingtawan&&ingtawan.status==='active'&&!getDoctorLeave(ingtawan.id,ds)&&
+        !hasDoctorConstraint(ingtawan.id,ds,'no_am')&&!usedAM.has(ingtawan.id);
+      if(canUseIngtawan){
+        s.pcu_am=ingtawan.id;usedAM.add(ingtawan.id);
+      }else if(dow===1){
+        s.pcu_am=null;
+      }else{
+        const p=pickMin(availAM.filter(d=>!usedAM.has(d.id)),new Set(),wlErDay);
+        s.pcu_am=p?.id||null;if(p)usedAM.add(p.id);
+      }
+    }
+    if(dow===2||dow===5){
+      const canUseIngtawan=ingtawan&&ingtawan.status==='active'&&!getDoctorLeave(ingtawan.id,ds)&&
+        !hasDoctorConstraint(ingtawan.id,ds,'no_am')&&!hasDoctorConstraint(ingtawan.id,ds,'no_pm')&&
+        !usedAM.has(ingtawan.id)&&!usedPM.has(ingtawan.id);
+      if(canUseIngtawan){
+        s.pcu_full=ingtawan.id;usedAM.add(ingtawan.id);usedPM.add(ingtawan.id);
+      }else if(dow===5){
+        s.pcu_full=null;
+      }else{
+        const p=pickMin(availAll.filter(d=>!usedAM.has(d.id)&&!usedPM.has(d.id)),new Set(),wlErDay);
+        s.pcu_full=p?.id||null;if(p){usedAM.add(p.id);usedPM.add(p.id);}
+      }
+    }
+    // ปัถย์ → จิตเวชวันพุธ: assign ได้เลยเพราะ pre-block ป้องกัน ER ทับแล้ว
+    // ถ้า patth อยู่ WARD → ข้ามไป ให้ simpleAM('psychiatry_am') สุ่มแพทย์อื่นแทน
+    if(patthLockedForPsychiatry){
+      s.psychiatry_am=patth.id;
+      // usedAM มี patth.id อยู่แล้วจาก pre-block
+    }
+
+    // Remaining AM slots
+    const simpleAM=(key,pool)=>{
+      if(s[key]!=null){if(s[key])usedAM.add(s[key]);return;}
+      const av=pool.filter(d=>!usedAM.has(d.id));
+      const p=shuffle(av)[0]||null;s[key]=p?.id||null;if(p)usedAM.add(p.id);
+    };
+    // นับแพทย์สุ่มที่ลา (เต็มวัน/ประชุม) วันนี้
+    const leavingTodayCount=rdocs.filter(d=>{const lv=getDoctorLeave(d.id,ds);return lv==='full'||lv==='meeting';}).length;
+    // ถ้าแพทย์ลา ≥3 คน → ต้องใช้ทวีศักดิ์ที่ Clinic; ถ้าปิยารัตน์อยู่ Clinic และลา ≥2 คน ให้ใช้ทวีศักดิ์ที่ NCD แทน
+    const tawisakMustClinic=leavingTodayCount>=3;
+    const tawisak=getDoctorByName('ทวีศักดิ์');
+    const piyaratInClinic=piyarat&&s.clinic_am===piyarat.id;
+    const tawisakMustNcd=leavingTodayCount>=2&&piyaratInClinic;
+    if(tawisakMustNcd)s.ncd_am=null;
+    else simpleAM('ncd_am',availAM);
+    if(!tawisakMustClinic)simpleAM('clinic_am',availAM); // ถ้า ≥3 ลา → ข้ามการสุ่ม Clinic ทั่วไป
+    if(dow===3)simpleAM('psychiatry_am',availAM);
+    // geriatric_am: เฉพาะพศวัต ไม่หาคนแทน
+    simpleAM('opd2_am',availAM);simpleAM('opd3_am',availAM);
+
+    // ทวีศักดิ์ Clinic Logic:
+    //   ถ้าแพทย์ลา ≥3 คน → ทวีศักดิ์ต้องอยู่ Clinic เสมอ; ยกเว้นปิยารัตน์อยู่ Clinic ให้ไป NCD
+    //   ถ้าแพทย์ลา <3 คน → ทวีศักดิ์อยู่ Clinic เฉพาะเมื่อห้องว่าง ≥3 ห้อง
+    {
+      if(tawisak&&tawisak.status==='active'&&s.ward!==tawisak.id&&!usedAM.has(tawisak.id)){
+        const lvT=getDoctorLeave(tawisak.id,ds);
+        const canWorkT=lvT!=='full'&&lvT!=='meeting'&&lvT!=='half_am';
+        if(tawisakMustNcd){
+          if(canWorkT){s.ncd_am=tawisak.id;usedAM.add(tawisak.id);}
+          else s.ncd_am=null;
+        }else if(tawisakMustClinic){
+          if(canWorkT){s.clinic_am=tawisak.id;usedAM.add(tawisak.id);}
+          else s.clinic_am=null; // ทวีศักดิ์ลา → Clinic ว่าง (ไม่มีคนอื่นมาแทน)
+        } else if(!s.clinic_am){
+          // เงื่อนไขเดิม: Clinic ว่าง + ห้องตรวจว่าง ≥3 ห้อง
+          const emptyOpdCount=[s.opd3_am,s.opd2_am,s.clinic_am,s.ncd_am].filter(v=>!v).length;
+          if(canWorkT&&emptyOpdCount>=3){s.clinic_am=tawisak.id;usedAM.add(tawisak.id);}
+        }
+      }
+    }
+
+    // PM OPD slots: ใช้แพทย์ที่ไม่ลา/ไม่ติดเงื่อนไขให้หมดก่อน
+    // ไม่ block แพทย์ที่ทำงาน AM ทั่วไป ยกเว้น OPD1 AM และงานเต็มวัน/งานบ่ายที่ชนเวลา
+    const pmOpdUsed=new Set([
+      s.ward,s.er_day,s.pcu_full,s.opd1_am,
+      s.palliative_pm,s.acupuncture_pm,s.dm_remission_pm,s.telemedicine_pm
+    ].filter(Boolean));
+    // simpleOpdPM: ให้ความสำคัญแพทย์ที่ยังไม่มี AM slot ก่อน (เพื่อให้ทุกคนมีวันทำการในเวลา)
+    const simpleOpdPM=(key,pool)=>{
+      if(s[key]!=null){if(s[key])pmOpdUsed.add(s[key]);return;}
+      const av=pool.filter(d=>!pmOpdUsed.has(d.id));
+      // ให้ความสำคัญแพทย์ที่ไม่มี AM slot (ยังไม่อยู่ใน usedAM) ก่อน
+      const noAMFirst=av.filter(d=>!usedAM.has(d.id));
+      const chosen=noAMFirst.length?noAMFirst:av;
+      const p=pickBal(chosen,new Set(),mOpdPm)||null;
+      s[key]=p?.id||null;if(p){pmOpdUsed.add(p.id);mOpdPm[p.id]=(mOpdPm[p.id]||0)+1;}
+    };
+    simpleOpdPM('opd1_pm',availPM);simpleOpdPM('opd2_pm',availPM);simpleOpdPM('opd3_pm',availPM);
+    // palliative_pm: เฉพาะอิงตะวัน ไม่หาคนแทน
+    // acupuncture_pm: เฉพาะพศวัต ไม่หาคนแทน
+    // dm_remission_pm: เฉพาะพศวัต ไม่หาคนแทน
+    // telemedicine_pm: เฉพาะพศวัต/อิงตะวัน ไม่หาคนแทน
+
+    // Final sweep: แพทย์สุ่มที่ยังไม่มี slot ในเวลาเลยวันนี้ → พยายามใส่ OPD3/OPD2/OPD1 PM
+    // เพื่อให้ทุกคนมี (วันในเวลา + ลาเต็มวัน + ลาประชุม) = วันทำการรวม
+    {
+      const pmSlotKeys=['opd3_pm','opd2_pm','opd1_pm'];
+      for(const doc of rdocs){
+        const lv=getDoctorLeave(doc.id,ds);
+        if(lv==='full'||lv==='meeting')continue; // ลาแล้ว นับเป็นวันทำการ ไม่ต้องใส่
+        // ตรวจว่ามี in-time slot อยู่แล้วไหม (AM หรือ PM ในเวลา)
+        const inTimeSlotKeys=['ward','er_day','opd1_am','opd2_am','opd3_am','clinic_am','ncd_am',
+          'psychiatry_am','pcu_am','pcu_full','geriatric_am','opd1_pm','opd2_pm','opd3_pm'];
+        const hasSlot=inTimeSlotKeys.some(k=>s[k]===doc.id);
+        if(hasSlot)continue;
+        // ไม่มี slot เลย → หาช่อง OPD PM ว่างใส่
+        if(lv==='half_pm')continue; // ลาครึ่งบ่าย ทำ PM ไม่ได้
+        if(hasDoctorConstraint(doc.id,ds,'no_pm'))continue;
+        for(const key of pmSlotKeys){
+          if(!s[key]&&!pmOpdUsed.has(doc.id)){
+            s[key]=doc.id;pmOpdUsed.add(doc.id);mOpdPm[doc.id]=(mOpdPm[doc.id]||0)+1;break;
+          }
+        }
+      }
+    }
+  }
+
+  // แพทย์ WARD ประจำสัปดาห์ยังเป็นเจ้าของสัปดาห์เดิม
+  // หากวันใดติด OFF/ER/ลา ระบบชั้นท้ายจะหาแพทย์ช่วยเฉพาะวันนั้น ไม่เปลี่ยนทั้งสัปดาห์
+
+  // Final conflict scan: WARD ต้องไม่ชนกับ ER เท่านั้น
+  {
+    const ER_ONLY=['er_day','opd1_am'];
+    for(const ds of days){
+      if(!isWorkday(ds)||!ns[ds]||!ns[ds].ward)continue;
+      if(ER_ONLY.some(k=>ns[ds][k]===ns[ds].ward))ns[ds].ward=null;
+    }
+  }
+
+  // ทวีศักดิ์ re-evaluation: หลัง post-cleanup อาจมี Clinic/NCD เปลี่ยนแปลง
+  // บังคับ: ถ้าแพทย์ลา ≥3 คน → ทวีศักดิ์ต้องอยู่ Clinic; ถ้าปิยารัตน์อยู่ Clinic และลา ≥2 คน ให้ไป NCD
+  // เพิ่มเติม: ถ้า Clinic ว่าง + ห้องว่าง ≥3 ห้อง → ทวีศักดิ์ช่วย
+  {
+    const tawisak=getDoctorByName('ทวีศักดิ์');
+    if(tawisak&&tawisak.status==='active'){
+      for(const ds of days){
+        if(!isWorkday(ds)||!ns[ds])continue;
+        if(ns[ds].ward===tawisak.id)continue; // ทวีศักดิ์อยู่ WARD → ข้าม
+        const lvT=getDoctorLeave(tawisak.id,ds);
+        const canWorkT=lvT!=='full'&&lvT!=='meeting'&&lvT!=='half_am';
+        const leavingCount=rdocs.filter(d=>{const lv=getDoctorLeave(d.id,ds);return lv==='full'||lv==='meeting';}).length;
+        const piyaratInClinic=piyarat&&ns[ds].clinic_am===piyarat.id;
+        if(leavingCount>=2&&piyaratInClinic){
+          if(canWorkT)ns[ds].ncd_am=tawisak.id;
+          else ns[ds].ncd_am=null;
+        }else if(leavingCount>=3){
+          // บังคับ: ถ้าทวีศักดิ์ทำได้ → ใส่ Clinic (ล้างคนอื่นออก)
+          if(canWorkT){ns[ds].clinic_am=tawisak.id;}
+          else ns[ds].clinic_am=null; // ทวีศักดิ์ลา → ไม่มีคนอื่นมาแทน
+        } else if(!ns[ds].clinic_am){
+          // เงื่อนไขเดิม: Clinic ว่าง + ห้องว่าง ≥3
+          const emptyOpdCount=[ns[ds].opd3_am,ns[ds].opd2_am,ns[ds].clinic_am,ns[ds].ncd_am].filter(v=>!v).length;
+          if(canWorkT&&emptyOpdCount>=3)ns[ds].clinic_am=tawisak.id;
+        }
+      }
+    }
+  }
+
+  // Second final sweep: หลัง post-cleanup + ทวีศักดิ์ re-eval อาจมีแพทย์ที่ slot ถูกล้างออก
+  // ต้องหา PM slot ให้แพทย์ที่ไม่มี slot เลย เพื่อให้วันทำการ + วันลา = total ทุกคน
+  {
+    for(const ds of days){
+      if(!isWorkday(ds)||!ns[ds])continue;
+      const s2=ns[ds];
+      const pmSlotKeys2=['opd3_pm','opd2_pm','opd1_pm'];
+      // สร้าง pm2Used จาก slot ทั้งหมดที่มีแพทย์แล้ว (ทั้ง AM และ PM)
+      const pm2Used=new Set([
+        s2.ward,s2.er_day,s2.pcu_full,s2.opd1_am,
+        s2.palliative_pm,s2.acupuncture_pm,s2.dm_remission_pm,s2.telemedicine_pm,
+        s2.opd1_pm,s2.opd2_pm,s2.opd3_pm
+      ].filter(Boolean));
+      for(const doc of rdocs){
+        const lv=getDoctorLeave(doc.id,ds);
+        if(lv==='full'||lv==='meeting')continue; // ลาแล้ว นับเป็นวันทำการ ไม่ต้องใส่
+        const inTimeSlotKeys2=['ward','er_day','opd1_am','opd2_am','opd3_am','clinic_am','ncd_am',
+          'psychiatry_am','pcu_am','pcu_full','geriatric_am','opd1_pm','opd2_pm','opd3_pm'];
+        const hasSlot=inTimeSlotKeys2.some(k=>s2[k]===doc.id);
+        if(hasSlot)continue;
+        if(lv==='half_pm')continue; // ลาครึ่งบ่าย ทำ PM ไม่ได้
+        if(hasDoctorConstraint(doc.id,ds,'no_pm'))continue;
+        for(const key of pmSlotKeys2){
+          if(!s2[key]&&!pm2Used.has(doc.id)){
+            s2[key]=doc.id;pm2Used.add(doc.id);mOpdPm[doc.id]=(mOpdPm[doc.id]||0)+1;break;
+          }
+        }
+      }
+    }
+  }
+
+  // WARD final guarantee: วันทำการทุกวันต้องมี WARD
+  // ถ้าแพทย์ไม่พอ ให้ดึงแพทย์จาก OPD3 ก่อน แล้ว OPD2 เท่านั้น
+  {
+    const STEAL_OPD3=['opd3_am','opd3_pm'];
+    const STEAL_OPD2=['opd2_am','opd2_pm'];
+    const STEALABLE=[...STEAL_OPD3,...STEAL_OPD2];
+    const protectedKeys=new Set(['er_day','opd1_am','er_night','off_am','opd1_pm','pcu_full','ncd_am','clinic_am','pcu_am',
+      'psychiatry_am','geriatric_am','palliative_pm','acupuncture_pm','dm_remission_pm','telemedicine_pm']);
+    const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+    const monthWardIds=[...new Set(days.filter(ds=>isWorkday(ds)).map(ds=>ww[getWeekKey(ds)]).filter(id=>rdocs.some(d=>d.id===id)))];
+    const monthWardPool=rdocs.filter(d=>monthWardIds.includes(d.id));
+    const wardOk=(s,id,ds)=>{
+      if(!id)return false;
+      if(getDoctorLeave(id,ds))return false;
+      if(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_pm'))return false;
+      if(s.off_am===id||s.er_day===id||s.opd1_am===id||s.er_night===id)return false;
+      return true;
+    };
+    const canUseForWard=(s,id,ds,allowedSteals)=>{
+      if(!wardOk(s,id,ds))return false;
+      for(const k of heldKeys(s,id)){
+        if(k==='ward')continue;
+        if(protectedKeys.has(k))return false;
+        if(!allowedSteals.includes(k))return false;
+      }
+      return true;
+    };
+    const clearWardSteals=(s,id)=>{
+      for(const k of STEALABLE){if(s[k]===id)s[k]=null;}
+    };
+    const chooseWard=(s,ds)=>{
+      const current=s.ward&&canUseForWard(s,s.ward,ds,STEALABLE)?getDoctorById(s.ward):null;
+      if(current)return current;
+      const chooseFrom=pool=>{
+        const tiers=[
+          {keys:[], pool:pool.filter(d=>canUseForWard(s,d.id,ds,[]))},
+          {keys:STEAL_OPD3, pool:pool.filter(d=>canUseForWard(s,d.id,ds,STEAL_OPD3))},
+          {keys:STEALABLE, pool:pool.filter(d=>canUseForWard(s,d.id,ds,STEALABLE))}
+        ];
+        for(const tier of tiers){
+          const p=pickBal(tier.pool,new Set(),wlWardTotal,mWard);
+          if(p)return p;
+        }
+        return null;
+      }
+      return chooseFrom(monthWardPool);
+    };
+    for(const ds of days){
+      if(!isWorkday(ds)||!ns[ds])continue;
+      const s=ns[ds];
+      if(s.ward&&canUseForWard(s,s.ward,ds,STEALABLE)){clearWardSteals(s,s.ward);continue;}
+      s.ward=null;
+      const p=chooseWard(s,ds);
+      if(p){
+        clearWardSteals(s,p.id);
+        s.ward=p.id;
+      }
+    }
+  }
+
+  // Required ER/OPD1 guarantee: ER ในเวลา และ OPD1/ER นอกเวลา ห้ามว่าง
+  // ถ้าแพทย์ไม่พอ ให้ดึงจาก OPD3/OPD2 ก่อน แล้วค่อยดึงช่องตรวจทั่วไป โดยไม่แตะ WARD/OFF/ER/งานเฉพาะ
+  {
+    const STEAL_OPD3=['opd3_am','opd3_pm'];
+    const STEAL_OPD2=['opd2_am','opd2_pm'];
+    const STEALABLE=[...STEAL_OPD3,...STEAL_OPD2];
+    const OPD1_STEALABLE=STEALABLE;
+    const protectedKeys=new Set(['ward','off_am','opd1_pm','pcu_full','ncd_am','clinic_am','pcu_am',
+      'psychiatry_am','geriatric_am','palliative_pm','acupuncture_pm','dm_remission_pm','telemedicine_pm']);
+    const opd1ProtectedKeys=new Set(['ward','off_am','er_day','psychiatry_am','geriatric_am','palliative_pm',
+      'acupuncture_pm','dm_remission_pm','telemedicine_pm']);
+    const heldKeys=(s,id)=>Object.entries(s).filter(([,v])=>v===id).map(([k])=>k);
+    const clearSteals=(s,id,keys=STEALABLE)=>{for(const k of keys){if(s[k]===id)s[k]=null;}};
+    const canUseRequired=(s,id,ds,slot,allowedSteals)=>{
+      if(!id)return false;
+      const lv=getDoctorLeave(id,ds);
+      if(lv==='full'||lv==='meeting')return false;
+      if(slot==='er_day'&&lv)return false;
+      if(slot==='er_day'&&(hasDoctorConstraint(id,ds,'no_am')||hasDoctorConstraint(id,ds,'no_pm')))return false;
+      if(slot==='opd1_am'&&lv==='half_am')return false;
+      if(slot==='opd1_am'&&hasDoctorConstraint(id,ds,'no_am'))return false;
+      if(slot==='opd1_am'&&hasMeetingNextDay(id,ds))return false;
+      if(s.ward===id||s.off_am===id)return false;
+      if(slot==='er_day'&&s.opd1_am===id)return false;
+      if(slot==='opd1_am'&&(s.er_day===id||hasDoctorConstraint(id,ds,'no_oncall')))return false;
+      if(slot==='opd1_am'){
+        const nextWorkday=nextWorkdayForHoliday(ds);
+        const nextWardId=nextWorkday?ww[getWeekKey(nextWorkday)]:null;
+        if(nextWardId&&nextWardId!==ww[getWeekKey(ds)]&&id===nextWardId)return false;
+        const nds=nextDateStr(ds);
+        if(!isWorkday(nds)&&(ns[nds]?.er_24||state.schedule[nds]?.er_24)===id)return false;
+      }
+      for(const k of heldKeys(s,id)){
+        if(k===slot)continue;
+        if(slot==='opd1_am'&&k==='er_night')continue;
+        const protectedForSlot=slot==='opd1_am'?opd1ProtectedKeys:protectedKeys;
+        if(protectedForSlot.has(k))return false;
+        if((k==='er_day'||k==='opd1_am'||k==='er_night')&&k!==slot)return false;
+        if(!allowedSteals.includes(k))return false;
+      }
+      return true;
+    };
+    const chooseRequired=(s,ds,slot)=>{
+      const maxSteals=slot==='opd1_am'?OPD1_STEALABLE:STEALABLE;
+      const current=s[slot]&&canUseRequired(s,s[slot],ds,slot,maxSteals)?getDoctorById(s[slot]):null;
+      if(current)return current;
+      const counters=slot==='opd1_am'?[mErNight,mErOncall,wlErNight]:[mErDay,wlErDay];
+      const tiers=slot==='opd1_am'
+        ? [
+          {keys:[], pool:rdocs.filter(d=>canUseRequired(s,d.id,ds,slot,[]))},
+          {keys:STEAL_OPD3, pool:rdocs.filter(d=>canUseRequired(s,d.id,ds,slot,STEAL_OPD3))},
+          {keys:STEALABLE, pool:rdocs.filter(d=>canUseRequired(s,d.id,ds,slot,STEALABLE))},
+          {keys:OPD1_STEALABLE, pool:rdocs.filter(d=>canUseRequired(s,d.id,ds,slot,OPD1_STEALABLE))}
+        ]
+        : [
+          {keys:[], pool:rdocs.filter(d=>canUseRequired(s,d.id,ds,slot,[]))},
+          {keys:STEAL_OPD3, pool:rdocs.filter(d=>canUseRequired(s,d.id,ds,slot,STEAL_OPD3))},
+          {keys:STEALABLE, pool:rdocs.filter(d=>canUseRequired(s,d.id,ds,slot,STEALABLE))}
+        ];
+      for(const tier of tiers){
+        const fairPool=slot==='opd1_am'?fairMonthlyPool(tier.pool,mErNight):tier.pool;
+        const p=pickBal(fairPool,new Set(),...counters)||(
+          slot==='opd1_am'?pickBal(tier.pool,new Set(),...counters):null
+        );
+        if(p)return p;
+      }
+      return null;
+    };
+    for(const ds of days){
+      if(!isWorkday(ds)||!ns[ds])continue;
+      const s=ns[ds];
+
+      if(!s.er_day||!canUseRequired(s,s.er_day,ds,'er_day',STEALABLE)){
+        s.er_day=null;
+        const p=chooseRequired(s,ds,'er_day');
+        if(p){clearSteals(s,p.id);s.er_day=p.id;}
+      }else{
+        clearSteals(s,s.er_day);
+      }
+
+      const opd1Current=s.opd1_am&&s.er_night===s.opd1_am?s.opd1_am:null;
+      if(!opd1Current||!canUseRequired(s,opd1Current,ds,'opd1_am',OPD1_STEALABLE)){
+        s.opd1_am=null;s.er_night=null;
+        const p=chooseRequired(s,ds,'opd1_am');
+        if(p){clearSteals(s,p.id,OPD1_STEALABLE);s.opd1_am=p.id;s.er_night=p.id;}
+      }else{
+        clearSteals(s,opd1Current,OPD1_STEALABLE);
+      }
+    }
+  }
+
+  enforceTawisakNcdWhenPiyaratClinic(ns,days);
+  enforceDoctorSlotLimits(ns,days);
+  stabilizeWorkdayHardRules(ns,days);
+  enforceRandomErDayBalance(ns,days);
+  balanceRandomMonthlyDuties();
+  enforceTawisakNcdWhenPiyaratClinic(ns,days);
+  enforceDoctorSlotLimits(ns,days);
+  stabilizeWorkdayHardRules(ns,days);
+  enforceRandomErDayBalance(ns,days);
+  balanceRandomMonthlyDuties();
+  enforceRandomMonthlyDutyBalance(ns,days);
+  stabilizeWorkdayHardRules(ns,days);
+  enforceRandomErDayBalance(ns,days);
+  enforceRandomMonthlyDutyBalance(ns,days);
+  stabilizeWorkdayHardRules(ns,days);
+  enforceRandomErDayBalance(ns,days);
+  enforceRandomMonthlyDutyBalance(ns,days);
+  stabilizeWorkdayHardRules(ns,days);
+  enforceRandomErDayBalance(ns,days);
+  enforceRandomDoctorIntimeCoverage(ns,days);
+  enforceRandomPcuAndOpdPmBalance(ns,days);
+  stabilizeWorkdayHardRules(ns,days);
+  enforceRandomErDayBalance(ns,days);
+  enforceRandomDoctorIntimeCoverage(ns,days);
+  enforceRandomPcuAndOpdPmBalance(ns,days);
+  state.schedule=ns;
+  if(!state.generatedMonths)state.generatedMonths={};
+  state.generatedMonths[monthKey(year,month)]=true;
+  saveState();
+  renderSchedule();renderSummary();
+  alert('✅ สร้างตารางสำเร็จ!\nกดที่ชื่อแพทย์ในตารางเพื่อแก้ไขได้');
+}
+
+function clearSchedule(){
+  if(isMonthLocked()){
+    alert(`เดือน${TH_MONTHS[state.month]} ${state.year+543} บันทึกสถิติแล้ว\nกรุณาลบสถิติเดือนนี้ก่อนจึงจะล้างตารางได้`);
+    return;
+  }
+  if(!confirm(`ล้างตารางเฉพาะเดือน${TH_MONTHS[state.month]} ${state.year+543} หรือไม่?`))return;
+  const days=getDaysInMonth(state.year,state.month);
+  for(const ds of days)delete state.schedule[ds];
+  const weeks=[...new Set(days.filter(ds=>isWorkday(ds)).map(getWeekKey))];
+  for(const wk of weeks){
+    if(getWardOwnerMonth(wk)===monthKey())delete state.wardWeeks[wk];
+  }
+  if(state.generatedMonths)delete state.generatedMonths[monthKey()];
+  saveState();renderSchedule();renderSummary();
+}
+
+// ===================== RENDER SCHEDULE =====================
+function renderSchedule(){
+  const{year,month}=state;
+  const locked=isMonthLocked(year,month);
+  document.getElementById('scheduleTitle').textContent=`ตารางเดือน${TH_MONTHS[month]} พ.ศ. ${year+543}${locked?' (ล็อกหลังบันทึกสถิติ)':''}`;
+  const days=getDaysInMonth(year,month);
+  const workdayScheduleCount=days.filter(ds=>{
+    if(!isWorkday(ds))return false;
+    const s=state.schedule[ds];
+    return !!(s&&Object.values(s).some(v=>v));
+  }).length;
+  // Do not let a stale cloud/GitHub-synced generatedMonths flag rebuild a blank month
+  // after the user manually picks just one cell.
+  const shouldAutoRepair=workdayScheduleCount>=3;
+  if(!locked&&shouldAutoRepair){
+    let tawisakChanged=false;
+    tawisakChanged=enforceTawisakNcdWhenPiyaratClinic(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceDoctorSlotLimits(state.schedule,days)||tawisakChanged;
+    tawisakChanged=stabilizeWorkdayHardRules(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomErDayBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceTawisakNcdWhenPiyaratClinic(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceDoctorSlotLimits(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomMonthlyDutyBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=stabilizeWorkdayHardRules(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomErDayBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomMonthlyDutyBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=stabilizeWorkdayHardRules(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomErDayBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomMonthlyDutyBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=stabilizeWorkdayHardRules(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomErDayBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomDoctorIntimeCoverage(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomPcuAndOpdPmBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=stabilizeWorkdayHardRules(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomErDayBalance(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomDoctorIntimeCoverage(state.schedule,days)||tawisakChanged;
+    tawisakChanged=enforceRandomPcuAndOpdPmBalance(state.schedule,days)||tawisakChanged;
+    if(tawisakChanged)saveState();
+  }
+  const sections=[];let lastSec='';
+  for(const sd of ALL_SLOT_DEFS){
+    if(sd.section!==lastSec){sections.push({name:sd.section,count:1});lastSec=sd.section;}
+    else sections[sections.length-1].count++;
+  }
+
+  let html=`<table class="schedule-table text-xs w-full"><thead><tr>`;
+  html+=`<th rowspan="2" class="sticky-corner sticky-hdr border px-2 py-1 bg-gray-200 font-bold text-gray-700 text-left min-w-[88px] whitespace-nowrap">วันที่</th>`;
+  for(const sec of sections){
+    const col=SEC_COLORS[sec.name]||'#f1f5f9';
+    html+=`<th colspan="${sec.count}" class="sticky-hdr border px-1 py-1 text-center font-bold text-gray-700 text-[10px]" style="background:${col}">${sec.name}</th>`;
+  }
+  html+=`</tr><tr>`;
+  for(const sd of ALL_SLOT_DEFS){
+    const col=SEC_COLORS[sd.section]||'#f1f5f9';
+    html+=`<th class="sticky-hdr border px-0.5 py-1 text-center" style="background:${col};min-width:58px">
+      <div class="font-bold text-gray-800 text-[10px]">${sd.label}</div>
+      <div class="text-gray-400 font-normal text-[9px] leading-tight">${sd.sub}</div>
+    </th>`;
+  }
+  html+=`</tr></thead><tbody>`;
+
+  for(const ds of days){
+    const d=parseDate(ds);const dow=d.getDay();
+    const isHol=isHoliday(ds);const isWknd=dow===0||dow===6;const isOff=isWknd||isHol;
+    const holName=state.holidays[ds]||'';
+    // สีเดียวกันทั้งเสาร์/อา/วันหยุด
+    const rowCls=isOff?'row-offday':'row-workday';
+    const dateTxt=isOff?'text-white':'text-gray-800';
+
+    html+=`<tr class="${rowCls}">`;
+    html+=`<td class="sticky-col border px-2 py-1 whitespace-nowrap font-semibold ${dateTxt}">
+      <div class="text-sm font-bold">${d.getDate()} <span class="font-normal text-xs">${TH_DAYS[dow]}</span></div>
+      ${isHol&&!isWknd?`<div class="text-white text-[9px] leading-tight font-bold opacity-90">${holName.length>13?holName.substring(0,13)+'…':holName}</div>`:
+        isHol&&isWknd?`<div class="text-white text-[9px] leading-tight opacity-80">${holName.length>10?holName.substring(0,10)+'…':holName}</div>`:''}
+    </td>`;
+
+    const sched=state.schedule[ds]||{};
+    for(const sd of ALL_SLOT_DEFS){
+      const app=isSlotApplicable(sd.key,dow,isOff);
+      if(!app){html+=`<td class="border text-center text-gray-200 text-[9px]">—</td>`;continue;}
+      const docId=sched[sd.key];const doc=docId?getDoctorById(docId):null;
+      const color=doc?getDoctorColor(doc.id):null;
+      const leave=docId?getDoctorLeave(docId,ds):null;
+      if(doc){
+        const badge=leave&&isWorkday(ds)?`<div class="text-yellow-700 text-[8px] font-bold leading-tight mt-0.5">${LEAVE_LABELS[leave]||leave}</div>`:'';
+        html+=`<td class="border px-0.5 py-0.5 text-center">
+          <span class="doctor-chip ${color.bg} ${color.text}" ${locked?'':`onclick="openCellModal('${ds}','${sd.key}')"`}>${doc.name}</span>${badge}
+        </td>`;
+      } else {
+        html+=`<td class="border px-0.5 py-0.5 text-center">
+          <span class="text-gray-300 ${locked?'':'cursor-pointer hover:text-indigo-400'} text-base leading-none" ${locked?'':`onclick="openCellModal('${ds}','${sd.key}')"`}>+</span>
+        </td>`;
+      }
+    }
+    html+=`</tr>`;
+
+    // Leave sub-row. เงื่อนไขสุ่มยังถูกใช้คำนวณ แต่ไม่แสดงในหน้าตารางแพทย์
+    const leavesOnDay=Object.entries(state.leaves[ds]||{});
+    if(leavesOnDay.length&&isWorkday(ds)){
+      html+=`<tr class="${rowCls}"><td class="sticky-col border px-2 py-0.5 bg-yellow-50"><div class="text-yellow-600 text-[9px] font-bold">รายละเอียด</div></td>`;
+      html+=`<td colspan="${ALL_SLOT_DEFS.length}" class="border px-2 py-0.5 bg-yellow-50">
+        <div class="flex flex-wrap gap-1">
+          ${leavesOnDay.map(([did,lt])=>{const d2=getDoctorById(parseInt(did));if(!d2)return'';const c2=getDoctorColor(d2.id);return`<span class="${c2.bg} ${c2.text} doctor-chip">${d2.name}</span><span class="text-yellow-700 text-[10px] font-semibold mr-2">${LEAVE_LABELS[lt]||lt}</span>`;}).join('')}
+        </div>
+      </td></tr>`;
+    }
+  }
+  html+=`</tbody></table>`;
+  document.getElementById('scheduleContainer').innerHTML=html;
+}
+
+// ===================== CELL MODAL =====================
+let cellData=null;
+function openCellModal(ds,key){
+  if(isDateLocked(ds)){
+    const d=parseDate(ds);
+    alert(`เดือน${TH_MONTHS[d.getMonth()+1]} ${d.getFullYear()+543} บันทึกสถิติแล้ว\nกรุณาลบสถิติเดือนนี้ก่อนจึงจะแก้ไขตารางได้`);
+    return;
+  }
+  cellData={ds,key};
+  const d=parseDate(ds);const sd=ALL_SLOT_DEFS.find(s=>s.key===key);
+  document.getElementById('cellModalTitle').textContent=`${d.getDate()} ${TH_MONTHS[d.getMonth()+1]} — ${sd?.label||key}`;
+  document.getElementById('cellModalDesc').textContent=`${sd?.sub||''} | วัน${TH_DAYS_FULL[d.getDay()]}`;
+  const sel=document.getElementById('cellDoctorSelect');
+  sel.innerHTML='<option value="">— ว่าง —</option>';
+  for(const doc of getActiveDoctors()){
+    if(!canAssignDoctorToSlot(doc.id,key,ds))continue;
+    const opt=document.createElement('option');
+    opt.value=doc.id;opt.textContent=`${doc.name} (${doc.type==='fixed'?'คงที่':'สุ่ม'})`;
+    if((state.schedule[ds]||{})[key]===doc.id)opt.selected=true;
+    sel.appendChild(opt);
+  }
+  document.getElementById('cellModal').classList.remove('hidden');
+}
+function closeCellModal(){document.getElementById('cellModal').classList.add('hidden');cellData=null;}
+function saveCellModal(){
+  if(!cellData)return;
+  const{ds,key}=cellData;const docId=parseInt(document.getElementById('cellDoctorSelect').value)||null;
+  if(isDateLocked(ds)){
+    closeCellModal();
+    const d=parseDate(ds);
+    alert(`เดือน${TH_MONTHS[d.getMonth()+1]} ${d.getFullYear()+543} บันทึกสถิติแล้ว\nกรุณาลบสถิติเดือนนี้ก่อนจึงจะแก้ไขตารางได้`);
+    return;
+  }
+  if(!state.schedule[ds])state.schedule[ds]={};
+  if(docId&&!canAssignDoctorToSlot(docId,key,ds)){
+    alert('แพทย์คนนี้ไม่สามารถลงช่องตรวจนี้ได้ตามเงื่อนไขที่ตั้งไว้');
+    return;
+  }
+  state.schedule[ds][key]=docId;
+  if(key==='opd1_am')state.schedule[ds].er_night=docId;
+  if(key==='ward'){
+    const wk=getWeekKey(ds);
+    if(docId)state.wardWeeks[wk]=docId;
+    else delete state.wardWeeks[wk];
+  }
+  saveState();closeCellModal();renderSchedule();renderSummary();
+}
+
+// ===================== DOCTOR MANAGEMENT =====================
+function renderDoctorLists(){
+  function docCard(d){
+    const c=getDoctorColor(d.id);
+    const badge=d.status==='active'?`<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">ปฏิบัติงาน</span>`:d.status==='transferred_out'?`<span class="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded-full">ย้ายออก</span>`:`<span class="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">ย้ายเข้า</span>`;
+    return`<div class="flex items-center justify-between p-2 rounded-lg border border-gray-200 hover:bg-gray-50">
+      <div class="flex items-center gap-1.5 flex-wrap">
+        <span class="doctor-chip ${c.bg} ${c.text}">${d.name}</span>${badge}
+      </div>
+      <div class="flex gap-1">
+        <button onclick="openEditDoctorModal(${d.id})" class="text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200">แก้ไข</button>
+        <button onclick="removeDoctor(${d.id})" class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200">ลบ</button>
+      </div>
+    </div>`;
+  }
+  document.getElementById('randomDoctorList').innerHTML=state.doctors.filter(d=>d.type==='random').map(docCard).join('')||'<p class="text-gray-400 text-sm">ไม่มีแพทย์</p>';
+  document.getElementById('fixedDoctorList').innerHTML=state.doctors.filter(d=>d.type==='fixed').map(docCard).join('')||'<p class="text-gray-400 text-sm">ไม่มีแพทย์</p>';
+  document.getElementById('colorLegend').innerHTML=state.doctors.map(d=>{const c=getDoctorColor(d.id);return`<span class="doctor-chip ${c.bg} ${c.text} text-sm px-3 py-1">${d.name}</span>`;}).join('');
+  renderOncallDocDropdown();
+}
+function renderOncallDocDropdown(){
+  const sel=document.getElementById('oncallDocSel');
+  const oncallDocs=state.doctors.filter(d=>d.type==='fixed'&&d.status==='active'&&
+    (canAssignDoctorToSlot(d.id,'ward_24')||canAssignDoctorToSlot(d.id,'er_24')));
+  const cur=sel.value;
+  sel.innerHTML=oncallDocs.map(d=>`<option value="${d.id}">${d.name}</option>`).join('');
+  if(cur&&oncallDocs.some(d=>String(d.id)===cur))sel.value=cur;
+  renderOncallCalendar();
+}
+function renderOncallCalendar(){
+  const{year,month}=state;
+  const docId=parseInt(document.getElementById('oncallDocSel')?.value||0);
+  if(!docId){document.getElementById('oncallCalendar').innerHTML='';return;}
+  if(!state.fixedOncall[docId])state.fixedOncall[docId]={};
+  const offDays=getDaysInMonth(year,month).filter(ds=>!isWorkday(ds));
+  document.getElementById('oncallCalendar').innerHTML=offDays.map(ds=>{
+    const d=parseDate(ds);const holName=state.holidays[ds]||'';
+    const cur=state.fixedOncall[docId][ds]||'none';
+    return`<div class="border rounded-lg p-2 bg-red-100 border-red-300 flex flex-col gap-1">
+      <div class="font-bold text-xs text-gray-700">${d.getDate()} ${TH_DAYS[d.getDay()]}</div>
+      ${holName?`<div class="text-red-600 text-[9px] leading-tight">${holName.length>10?holName.substring(0,10)+'…':holName}</div>`:''}
+      <div class="flex gap-1 flex-wrap">
+        <button class="oncall-btn ${cur==='ward'?'oncall-ward':'oncall-none hover:bg-teal-50'}" onclick="toggleOncall(${docId},'${ds}','ward')">WARD</button>
+        <button class="oncall-btn ${cur==='er'?'oncall-er':'oncall-none hover:bg-amber-50'}" onclick="toggleOncall(${docId},'${ds}','er')">ER</button>
+      </div>
+    </div>`;
+  }).join('')||'<p class="text-gray-400 text-sm">ไม่มีวันหยุดในเดือนนี้</p>';
+}
+function toggleOncall(docId,ds,slot){
+  if(isDateLocked(ds)){
+    const d=parseDate(ds);
+    alert(`เดือน${TH_MONTHS[d.getMonth()+1]} ${d.getFullYear()+543} บันทึกสถิติแล้ว\nกรุณาลบสถิติเดือนนี้ก่อนจึงจะแก้ไขตารางได้`);
+    return;
+  }
+  const slotKey=slot==='ward'?'ward_24':'er_24';
+  if(!canAssignDoctorToSlot(docId,slotKey,ds)){
+    alert('แพทย์ประเสริฐอยู่ได้เฉพาะ Clinic วันพฤหัส และแพทย์ทวีศักดิ์อยู่ได้เฉพาะ Clinic/NCD เท่านั้น');
+    return;
+  }
+  if(!state.fixedOncall[docId])state.fixedOncall[docId]={};
+  const cur=state.fixedOncall[docId][ds]||'none';
+  state.fixedOncall[docId][ds]=(cur===slot)?'none':slot;
+  if(!state.schedule[ds])state.schedule[ds]={};
+  if(state.fixedOncall[docId][ds]==='ward')state.schedule[ds].ward_24=docId;
+  else if(state.fixedOncall[docId][ds]==='er')state.schedule[ds].er_24=docId;
+  else{
+    if(state.schedule[ds].ward_24===docId)state.schedule[ds].ward_24=null;
+    if(state.schedule[ds].er_24===docId)state.schedule[ds].er_24=null;
+  }
+  saveState();renderOncallCalendar();renderSchedule();
+}
+
+let nextDocId=20;
+function openAddDoctorModal(type){
+  document.getElementById('doctorModalTitle').textContent=`เพิ่มแพทย์${type==='fixed'?'คงที่':'สุ่ม'}`;
+  document.getElementById('editDoctorId').value='';document.getElementById('editDoctorType').value=type;
+  document.getElementById('doctorNameInput').value='';document.getElementById('doctorStatusInput').value='active';
+  document.getElementById('cond_psychiatry').checked=false;
+  document.getElementById('doctorModal').classList.remove('hidden');
+}
+function openEditDoctorModal(id){
+  const d=getDoctorById(id);if(!d)return;
+  document.getElementById('doctorModalTitle').textContent=`แก้ไข: ${d.name}`;
+  document.getElementById('editDoctorId').value=d.id;document.getElementById('editDoctorType').value=d.type;
+  document.getElementById('doctorNameInput').value=d.name;document.getElementById('doctorStatusInput').value=d.status||'active';
+  document.getElementById('cond_psychiatry').checked=!!d.cond_psychiatry;
+  document.getElementById('doctorModal').classList.remove('hidden');
+}
+function closeDoctorModal(){document.getElementById('doctorModal').classList.add('hidden');}
+function saveDoctorModal(){
+  const id=parseInt(document.getElementById('editDoctorId').value);
+  const type=document.getElementById('editDoctorType').value;
+  const name=document.getElementById('doctorNameInput').value.trim();
+  const status=document.getElementById('doctorStatusInput').value;
+  const cond_psychiatry=document.getElementById('cond_psychiatry').checked;
+  if(!name){alert('กรุณากรอกชื่อแพทย์');return;}
+  if(id){const d=getDoctorById(id);if(d)Object.assign(d,{name,status,cond_psychiatry});}
+  else state.doctors.push({id:nextDocId++,name,type,status,cond_psychiatry,colorIdx:assignFreeColorIdx()});
+  saveState();closeDoctorModal();renderDoctorLists();renderLeaveDropdown();renderConstraintDropdown();renderSchedule();renderSummary();
+}
+function removeDoctor(id){
+  const d=getDoctorById(id);if(!d)return;
+  if(!confirm(`ลบ ${d.name} ออกจากระบบหรือไม่?`))return;
+  state.doctors=state.doctors.filter(x=>x.id!==id);
+  for(const ds of Object.keys(state.schedule))for(const k of Object.keys(state.schedule[ds]))if(state.schedule[ds][k]===id)state.schedule[ds][k]=null;
+  saveState();renderDoctorLists();renderLeaveDropdown();renderConstraintDropdown();renderSchedule();
+}
+
+// ===================== LEAVE =====================
+function renderLeaveDropdown(){
+  const sel=document.getElementById('leaveDoctor');sel.innerHTML='';
+  for(const d of getActiveDoctors()){const opt=document.createElement('option');opt.value=d.id;opt.textContent=d.name;sel.appendChild(opt);}
+}
+function addLeave(){
+  const docId=parseInt(document.getElementById('leaveDoctor').value);
+  const start=getPickerVal('lvS');const end=isRangePickerVisible('leave')?(getPickerVal('lvE')||start):start;
+  const type=document.getElementById('leaveType').value;
+  if(!start||!docId){alert('กรุณาเลือกแพทย์และวันที่');return;}
+  const s=parseDate(start),e=parseDate(end);let cur=new Date(s);
+  while(cur<=e){
+    const ds=fmt(cur.getFullYear(),cur.getMonth()+1,cur.getDate());
+    if(!state.leaves[ds])state.leaves[ds]={};
+    state.leaves[ds][docId]=type;
+    cur.setDate(cur.getDate()+1);
+  }
+  saveState();renderLeaveList();renderSchedule();resetRangePickers();
+}
+function removeLeave(ds,docId){
+  if(state.leaves[ds]){delete state.leaves[ds][docId];if(!Object.keys(state.leaves[ds]).length)delete state.leaves[ds];}
+  saveState();renderLeaveList();renderSchedule();
+}
+function renderLeaveList(){
+  const{year,month}=state;
+  // badge
+  document.getElementById('leaveMonthBadge').textContent=`${TH_MONTHS[month]} ${year+543}`;
+  const entries=[];
+  for(const[ds,dm] of Object.entries(state.leaves)){
+    const d=parseDate(ds);
+    if(d.getFullYear()!==year||d.getMonth()+1!==month)continue;
+    for(const[did,type] of Object.entries(dm)){const doc=getDoctorById(parseInt(did));if(doc)entries.push({ds,doc,type});}
+  }
+  entries.sort((a,b)=>a.ds.localeCompare(b.ds));
+  document.getElementById('leaveList').innerHTML=entries.map(({ds,doc,type})=>{
+    const d=parseDate(ds);const c=getDoctorColor(doc.id);
+    return`<div class="flex items-center justify-between p-2 rounded-lg border border-amber-200 bg-amber-50">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-bold text-gray-600">${d.getDate()} ${TH_MS[d.getMonth()+1]} ${d.getFullYear()+543}</span>
+        <span class="doctor-chip ${c.bg} ${c.text}">${doc.name}</span>
+        <span class="text-xs text-amber-800 font-semibold">${LEAVE_LABELS[type]||type}</span>
+      </div>
+      <button onclick="removeLeave('${ds}',${doc.id})" class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200">ลบ</button>
+    </div>`;
+  }).join('')||'<p class="text-gray-400 text-sm">ไม่มีรายการในเดือนนี้</p>';
+}
+
+// ===================== CONSTRAINTS =====================
+function renderConstraintDropdown(){
+  const sel=document.getElementById('conDoctor');sel.innerHTML='';
+  for(const d of getActiveDoctors()){const opt=document.createElement('option');opt.value=d.id;opt.textContent=d.name;sel.appendChild(opt);}
+}
+function addConstraint(){
+  const docId=parseInt(document.getElementById('conDoctor').value);
+  const start=getPickerVal('cnS');const end=isRangePickerVisible('constraint')?(getPickerVal('cnE')||start):start;
+  const type=document.getElementById('conType').value;
+  if(!start||!docId){alert('กรุณาเลือกแพทย์และวันที่');return;}
+  const s=parseDate(start),e=parseDate(end);let cur=new Date(s);
+  while(cur<=e){
+    const ds=fmt(cur.getFullYear(),cur.getMonth()+1,cur.getDate());
+    if(!state.constraints[ds])state.constraints[ds]={};
+    const curVal=state.constraints[ds][docId];
+    const arr=Array.isArray(curVal)?curVal:(curVal?[curVal]:[]);
+    if(!arr.includes(type))arr.push(type);
+    state.constraints[ds][docId]=arr;
+    cur.setDate(cur.getDate()+1);
+  }
+  saveState();renderConstraintList();renderSchedule();resetRangePickers();
+}
+function removeConstraint(ds,docId,type=null){
+  if(state.constraints[ds]){
+    if(type){
+      const arr=getDoctorConstraints(docId,ds).filter(t=>t!==type);
+      if(arr.length)state.constraints[ds][docId]=arr;
+      else delete state.constraints[ds][docId];
+    }else{
+      delete state.constraints[ds][docId];
+    }
+    if(!Object.keys(state.constraints[ds]).length)delete state.constraints[ds];
+  }
+  saveState();renderConstraintList();renderSchedule();
+}
+function renderConstraintList(){
+  const{year,month}=state;
+  document.getElementById('conMonthBadge').textContent=`${TH_MONTHS[month]} ${year+543}`;
+  const entries=[];
+  for(const[ds,dm] of Object.entries(state.constraints)){
+    const d=parseDate(ds);
+    if(d.getFullYear()!==year||d.getMonth()+1!==month)continue;
+    for(const[did,val] of Object.entries(dm)){
+      const doc=getDoctorById(parseInt(did));
+      if(!doc)continue;
+      const types=Array.isArray(val)?val:(val?[val]:[]);
+      for(const type of types)entries.push({ds,doc,type});
+    }
+  }
+  entries.sort((a,b)=>a.ds.localeCompare(b.ds));
+  document.getElementById('constraintList').innerHTML=entries.map(({ds,doc,type})=>{
+    const d=parseDate(ds);const c=getDoctorColor(doc.id);
+    return`<div class="flex items-center justify-between p-2 rounded-lg border border-purple-200 bg-purple-50">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-bold text-gray-600">${d.getDate()} ${TH_MS[d.getMonth()+1]} ${d.getFullYear()+543}</span>
+        <span class="doctor-chip ${c.bg} ${c.text}">${doc.name}</span>
+        <span class="text-xs text-purple-800 font-semibold">${CON_LABELS[type]||type}</span>
+      </div>
+      <button onclick="removeConstraint('${ds}',${doc.id},'${type}')" class="text-xs bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200">ลบ</button>
+    </div>`;
+  }).join('')||'<p class="text-gray-400 text-sm">ไม่มีเงื่อนไขในเดือนนี้</p>';
+}
+
+// ===================== HOLIDAYS =====================
+function addHoliday(){
+  const date=getPickerVal('hol');const name=document.getElementById('holidayName').value.trim();
+  if(!date||!name){alert('กรุณากรอกวันที่และชื่อวันหยุด');return;}
+  state.holidays[date]=name;document.getElementById('holidayName').value='';saveState();
+  renderHolidayList();renderSchedule();
+}
+function removeHoliday(date){delete state.holidays[date];saveState();renderHolidayList();renderSchedule();}
+function clearHolidaysForYear(){
+  const fy=parseInt(document.getElementById('holidayFilterYear')?.value||0);
+  if(!fy){alert('กรุณาเลือกปีก่อน');return;}
+  if(!confirm(`ล้างวันหยุดปี ${fy+543} ทั้งหมดหรือไม่?`))return;
+  for(const ds of Object.keys(state.holidays)){if(parseDate(ds).getFullYear()===fy)delete state.holidays[ds];}
+  saveState();renderHolidayList();renderSchedule();
+}
+function renderHolidayList(){
+  const fy=parseInt(document.getElementById('holidayFilterYear')?.value||0);
+  const entries=Object.entries(state.holidays).sort((a,b)=>a[0].localeCompare(b[0]));
+  const filtered=fy?entries.filter(([ds])=>parseDate(ds).getFullYear()===fy):entries;
+  document.getElementById('holidayList').innerHTML=filtered.map(([ds,name])=>{
+    const d=parseDate(ds);
+    return`<div class="flex items-center justify-between p-2 rounded-lg border border-red-100 bg-red-50 hover:bg-red-100">
+      <div class="flex items-center gap-2">
+        <span class="text-xs font-bold text-gray-700">${d.getDate()} ${TH_MS[d.getMonth()+1]} ${d.getFullYear()+543}</span>
+        <span class="text-xs text-red-700">${TH_DAYS[d.getDay()]}</span>
+        <span class="text-xs text-gray-600">${name}</span>
+      </div>
+      <button onclick="removeHoliday('${ds}')" class="text-xs bg-red-200 text-red-800 px-2 py-1 rounded hover:bg-red-300">ลบ</button>
+    </div>`;
+  }).join('')||'<p class="text-gray-400 text-sm">ไม่มีวันหยุด</p>';
+}
+
+// ===================== SUMMARY =====================
+function renderSummary(){
+  const{year,month}=state;
+  const days=getDaysInMonth(year,month);
+  const workdays=days.filter(ds=>isWorkday(ds));
+  const offdays=days.filter(ds=>!isWorkday(ds));
+
+  // Header totals
+  document.getElementById('summaryContainer').innerHTML='';
+  const totDiv=document.createElement('div');
+  totDiv.className='flex flex-wrap gap-3 mb-4 text-sm';
+  totDiv.innerHTML=`
+    <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2 font-semibold text-blue-800">📅 วันในเดือน: <span class="text-lg">${days.length}</span> วัน</div>
+    <div class="bg-green-50 border border-green-200 rounded-lg px-4 py-2 font-semibold text-green-800">🏥 วันทำการ: <span class="text-lg">${workdays.length}</span> วัน</div>
+    <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-2 font-semibold text-red-800">🎉 วันหยุด/เสาร์-อา: <span class="text-lg">${offdays.length}</span> วัน</div>`;
+  document.getElementById('summaryContainer').appendChild(totDiv);
+
+  // Compute stats
+  const stats={};
+  for(const d of state.doctors){
+    stats[d.id]={days_in:0,leave_full:0,leave_half:0,leave_meeting:0,
+      ward_weeks:0,er_day:0,er_night:0,er_24:0,ward_24:0};
+  }
+  const curMk=monthKey();
+  // นับ WARD ประจำสัปดาห์จาก owner ใน state.wardWeeks
+  // แพทย์ที่มาช่วยรายวันเพราะ owner ติด OFF/ER/ลา ไม่ถูกนับเป็น WARD ประจำสัปดาห์
+  const seenWardWks=new Set();
+  for(const ds of days){
+    if(!isWorkday(ds))continue;
+    const wk=getWeekKey(ds);
+    const owner=state.wardWeeks[wk];
+    if(owner&&getWardOwnerMonth(wk)===curMk&&!seenWardWks.has(wk)){
+      seenWardWks.add(wk);
+      if(stats[owner])stats[owner].ward_weeks++;
+    }
+  }
+  // เฉพาะ slot ที่นับเป็น "วันทำการในเวลา"
+  const INTIME_KEYS=new Set(ALL_SLOT_DEFS.filter(d=>d.section!=='นอกเวลา'&&d.key!=='off_am').map(d=>d.key));
+  const AM_KEYS=new Set(['ward','er_day','pcu_full','opd1_am','opd2_am','opd3_am','ncd_am','clinic_am','pcu_am','psychiatry_am','geriatric_am']);
+  const PM_KEYS=new Set(['ward','er_day','pcu_full','opd1_pm','opd2_pm','opd3_pm','palliative_pm','acupuncture_pm','dm_remission_pm','telemedicine_pm']);
+  for(const ds of days){
+    const s=state.schedule[ds]||{};
+    const wd=isWorkday(ds);
+    for(const d of state.doctors){
+      if(!wd)continue;
+      const lv=getDoctorLeave(d.id,ds);
+      if(lv==='full'){stats[d.id].leave_full+=1;continue;}
+      if(lv==='meeting'){
+        stats[d.id].leave_meeting+=1;
+        stats[d.id].days_in+=1;
+        continue;
+      }
+      if(lv==='half_am'||lv==='half_pm'){
+        stats[d.id].leave_half+=0.5;
+        const workKeys=lv==='half_am'?PM_KEYS:AM_KEYS;
+        for(const key of workKeys){if(s[key]===d.id){stats[d.id].days_in+=0.5;break;}}
+        continue;
+      }
+      for(const key of INTIME_KEYS){if(s[key]===d.id){stats[d.id].days_in+=1;break;}}
+    }
+    if(s.er_day  &&stats[s.er_day  ])stats[s.er_day  ].er_day++;
+    if(s.er_night&&stats[s.er_night])stats[s.er_night].er_night++;
+    if(s.er_24   &&stats[s.er_24   ])stats[s.er_24   ].er_24++;
+    if(s.ward_24 &&stats[s.ward_24 ])stats[s.ward_24 ].ward_24++;
+  }
+
+  // Random doctors table
+  const fmtStat=v=>Number.isInteger(v)?v:(Math.round(v*10)/10);
+  const makeRowRandom=d=>{
+    const st=stats[d.id];const c=getDoctorColor(d.id);
+    const holidayTotal=(st.ward_24||0)+(st.er_24||0);
+    const dutyTotal=(st.ward_24||0)+(st.er_night||0)+(st.er_24||0);
+    return`<tr class="border-b hover:bg-gray-50">
+      <td class="px-3 py-2 sticky-col bg-white whitespace-nowrap"><span class="doctor-chip ${c.bg} ${c.text}">${d.name}</span>${d.status!=='active'?'<span class="text-red-400 text-[9px] ml-1">ไม่ปฏิบัติงาน</span>':''}</td>
+      <td class="px-3 py-2 text-center font-bold text-indigo-700">${fmtStat(st.days_in)}</td>
+      <td class="px-3 py-2 text-center">${st.ward_weeks||'-'}</td>
+      <td class="px-3 py-2 text-center text-violet-700 font-semibold">${st.ward_24||'-'}</td>
+      <td class="px-3 py-2 text-center">${st.er_day||'-'}</td>
+      <td class="px-3 py-2 text-center">${st.er_night||'-'}</td>
+      <td class="px-3 py-2 text-center">${st.er_24||'-'}</td>
+      <td class="px-3 py-2 text-center font-semibold text-violet-700">${holidayTotal||'-'}</td>
+      <td class="px-3 py-2 text-center font-bold text-slate-700">${dutyTotal||'-'}</td>
+      <td class="px-3 py-2 text-center text-amber-700">${fmtStat(st.leave_full)||'-'}</td>
+      <td class="px-3 py-2 text-center text-amber-600">${fmtStat(st.leave_half)||'-'}</td>
+      <td class="px-3 py-2 text-center text-blue-600">${fmtStat(st.leave_meeting)||'-'}</td>
+    </tr>`;
+  };
+  // Fixed doctors table (only holiday duty stats)
+  const makeRowFixed=d=>{
+      const st=stats[d.id];const c=getDoctorColor(d.id);
+    return`<tr class="border-b hover:bg-gray-50">
+      <td class="px-3 py-2 sticky-col bg-white whitespace-nowrap"><span class="doctor-chip ${c.bg} ${c.text}">${d.name}</span>${d.status!=='active'?'<span class="text-red-400 text-[9px] ml-1">ไม่ปฏิบัติงาน</span>':''}</td>
+      <td class="px-3 py-2 text-center font-bold text-indigo-700">${fmtStat(st.days_in)}</td>
+      <td class="px-3 py-2 text-center">${st.er_24||'-'}</td>
+      <td class="px-3 py-2 text-center">${st.ward_24||'-'}</td>
+      <td class="px-3 py-2 text-center text-amber-700">${fmtStat(st.leave_full)||'-'}</td>
+      <td class="px-3 py-2 text-center text-amber-600">${fmtStat(st.leave_half)||'-'}</td>
+      <td class="px-3 py-2 text-center text-blue-600">${fmtStat(st.leave_meeting)||'-'}</td>
+    </tr>`;
+  };
+
+  const rdocs=state.doctors.filter(d=>d.type==='random');
+  const fdocs=state.doctors.filter(d=>d.type==='fixed');
+
+  const theadR=`<table class="schedule-table text-xs w-full min-w-[940px]">
+    <thead><tr class="bg-indigo-50 text-gray-700 text-center">
+      <th class="px-3 py-2 text-left sticky-col bg-indigo-50">🎲 แพทย์สุ่มได้</th>
+      <th class="px-3 py-2">วันทำการ<br>ในเวลา</th>
+      <th class="px-3 py-2">WARD<br>(สัปดาห์)</th>
+      <th class="px-3 py-2 text-violet-700">WARD<br>วันหยุด</th>
+      <th class="px-3 py-2">ER<br>ในเวลา</th>
+      <th class="px-3 py-2">ER นอกเวลา<br><span class="text-[10px] font-normal">16:30-8:30</span></th>
+      <th class="px-3 py-2">ER วันหยุด<br><span class="text-[10px] font-normal">8:30-8:30</span></th>
+      <th class="px-3 py-2 text-violet-700">รวมเวรวันหยุด<br><span class="text-[10px] font-normal">WARD หยุด + ER หยุด</span></th>
+      <th class="px-3 py-2">รวมเวรสมดุล<br><span class="text-[10px] font-normal">WARD หยุด + ER นอก + ER หยุด</span></th>
+      <th class="px-3 py-2">ลา<br>เต็มวัน</th>
+      <th class="px-3 py-2">ลา<br>ครึ่งวัน</th>
+      <th class="px-3 py-2">ลา<br>ประชุม</th>
+    </tr></thead><tbody>${rdocs.map(makeRowRandom).join('')}</tbody></table>`;
+
+  const theadF=`<table class="schedule-table text-xs w-full min-w-[500px] mt-4">
+    <thead><tr class="bg-emerald-50 text-gray-700 text-center">
+      <th class="px-3 py-2 text-left sticky-col bg-emerald-50">📌 แพทย์คงที่</th>
+      <th class="px-3 py-2">วันทำการ<br>ในเวลา</th>
+      <th class="px-3 py-2">เวร ER<br>วันหยุด</th>
+      <th class="px-3 py-2">เวร WARD<br>วันหยุด</th>
+      <th class="px-3 py-2">ลา<br>เต็มวัน</th>
+      <th class="px-3 py-2">ลา<br>ครึ่งวัน</th>
+      <th class="px-3 py-2">ลา<br>ประชุม</th>
+    </tr></thead><tbody>${fdocs.map(makeRowFixed).join('')}</tbody></table>`;
+
+  const tableWrap=document.createElement('div');
+  tableWrap.innerHTML=theadR+theadF;
+  document.getElementById('summaryContainer').appendChild(tableWrap);
+
+  // History table
+  const hist=getHistoryTotals();
+  const histMonths=state.historyMonths||{};
+  if(!Object.keys(histMonths).length&&!Object.keys(state.history||{}).length){
+    document.getElementById('historyContainer').innerHTML='<p class="text-gray-400 text-sm">ยังไม่มีข้อมูลสถิติสะสม กด "บันทึกสถิติ" หลังสร้างตารางแต่ละเดือน</p>';
+    return;
+  }
+  const hthead=`<table class="schedule-table text-xs w-full min-w-[560px]">
+    <thead><tr class="bg-gray-100 text-gray-600 text-center">
+      <th class="px-3 py-2 text-left sticky-col bg-gray-100">แพทย์</th>
+      <th class="px-3 py-2">WARD สะสม<br>(สัปดาห์)</th>
+      <th class="px-3 py-2 text-violet-700">WARD วันหยุด<br>สะสม</th>
+      <th class="px-3 py-2">ER ในเวลา<br>สะสม</th>
+      <th class="px-3 py-2">ER นอกเวลา<br>สะสม</th>
+      <th class="px-3 py-2">ER วันหยุด<br>สะสม</th>
+    </tr></thead><tbody>`;
+  document.getElementById('historyContainer').innerHTML=hthead+
+    rdocs.map(d=>{
+      const h=hist[d.id]||{};const c=getDoctorColor(d.id);
+      return`<tr class="border-b hover:bg-gray-50">
+        <td class="px-3 py-2 sticky-col bg-white"><span class="doctor-chip ${c.bg} ${c.text}">${d.name}</span></td>
+        <td class="px-3 py-2 text-center font-bold">${h.ward_weeks||0}</td>
+        <td class="px-3 py-2 text-center font-bold text-violet-700">${h.ward_24||0}</td>
+        <td class="px-3 py-2 text-center font-bold">${h.er_day||0}</td>
+        <td class="px-3 py-2 text-center font-bold">${h.er_night||0}</td>
+        <td class="px-3 py-2 text-center font-bold">${h.er_24||0}</td>
+      </tr>`;
+    }).join('')+'</tbody></table>'+
+    `<div class="mt-4">
+      <h4 class="font-bold text-gray-700 mb-2">ประวัติรายเดือน</h4>
+      <table class="schedule-table text-xs w-full min-w-[520px]">
+        <thead><tr class="bg-blue-50 text-gray-700 text-center">
+          <th class="px-3 py-2 text-left">เดือน</th>
+          <th class="px-3 py-2 text-left">แพทย์</th>
+          <th class="px-3 py-2">WARD<br>(สัปดาห์)</th>
+          <th class="px-3 py-2 text-violet-700">WARD<br>วันหยุด</th>
+          <th class="px-3 py-2">ER ในเวลา</th>
+          <th class="px-3 py-2">ER นอกเวลา</th>
+          <th class="px-3 py-2">ER วันหยุด</th>
+          <th class="px-3 py-2">จัดการ</th>
+        </tr></thead><tbody>
+          ${Object.entries(histMonths).sort(([a],[b])=>b.localeCompare(a)).map(([mk,monthData])=>{
+            const[y,m]=mk.split('-').map(Number);
+            const rows=rdocs.map((d,idx)=>{
+              const h=(monthData||{})[d.id]||{};
+              const c=getDoctorColor(d.id);
+              return`<tr class="border-b hover:bg-gray-50">
+                ${idx===0?`<td class="px-3 py-2 font-semibold align-top" rowspan="${rdocs.length}">${TH_MONTHS[m]} ${y+543}</td>`:''}
+                <td class="px-3 py-2"><span class="doctor-chip ${c.bg} ${c.text}">${d.name}</span></td>
+                <td class="px-3 py-2 text-center">${h.ward_weeks||'-'}</td>
+                <td class="px-3 py-2 text-center text-violet-700">${h.ward_24||'-'}</td>
+                <td class="px-3 py-2 text-center">${h.er_day||'-'}</td>
+                <td class="px-3 py-2 text-center">${h.er_night||'-'}</td>
+                <td class="px-3 py-2 text-center">${h.er_24||'-'}</td>
+                ${idx===0?`<td class="px-3 py-2 text-center align-top" rowspan="${rdocs.length}">
+                  <button onclick="deleteHistoryMonth('${mk}')" class="bg-red-100 text-red-700 px-2 py-1 rounded hover:bg-red-200 font-semibold">ลบเดือนนี้</button>
+                </td>`:''}
+              </tr>`;
+            }).join('');
+            return rows;
+          }).join('')}
+        </tbody></table>
+      </div>`;
+}
+
+function saveHistoryFromCurrentMonth(){
+  const days=getDaysInMonth(state.year,state.month);
+  const rdocs=getRandomDoctors();
+  const mk=monthKey();
+  if(isMonthLocked()){
+    alert(`เดือน${TH_MONTHS[state.month]} ${state.year+543} บันทึกสถิติแล้ว\nหากต้องการแก้ไขหรือบันทึกใหม่ กรุณาลบเดือนนี้ในสถิติสะสมก่อน`);
+    return;
+  }
+  const monthData={};
+  for(const d of rdocs){
+    const h={ward_weeks:0,er_day:0,er_night:0,er_24:0,ward_24:0};
+    // นับ WARD ประจำสัปดาห์จาก owner ใน state.wardWeeks; ไม่รวมแพทย์ช่วยรายวัน
+    {const seenWkH=new Set();for(const ds of days){if(!isWorkday(ds))continue;const wk=getWeekKey(ds);if(state.wardWeeks[wk]===d.id&&getWardOwnerMonth(wk)===mk&&!seenWkH.has(wk)){seenWkH.add(wk);h.ward_weeks++;}}}
+    for(const ds of days){
+      const s=state.schedule[ds]||{};
+      if(s.er_day===d.id)h.er_day++;
+      if(s.er_night===d.id)h.er_night++;
+      if(s.er_24===d.id)h.er_24++;
+      if(s.ward_24===d.id)h.ward_24++;
+    }
+    monthData[d.id]=h;
+  }
+  if(!state.historyMonths)state.historyMonths={};
+  state.historyMonths[mk]=monthData;
+  state.history=getHistoryTotals();
+  saveState();renderSchedule();renderSummary();
+  alert(`✅ บันทึกสถิติเดือน${TH_MONTHS[state.month]} ${state.year+543} สำเร็จ\nตารางเดือนนี้ถูกล็อกแล้ว หากต้องการแก้ไขให้ลบสถิติเดือนนี้ก่อน`);
+}
+function deleteHistoryMonth(mk){
+  if(!confirm(`ลบประวัติสถิติเดือน ${mk} หรือไม่?`))return;
+  if(state.historyMonths)delete state.historyMonths[mk];
+  state.history=getHistoryTotals();
+  saveState();renderSchedule();renderSummary();
+}
+function clearHistory(){
+  if(!confirm('ล้างข้อมูลสถิติสะสมทั้งหมดหรือไม่?'))return;
+  state.history={};state.historyMonths={};saveState();renderSummary();
+}
+
+// ===================== NAVIGATION =====================
+function switchTab(tab){
+  ['schedule','doctors','leaves','constraints','summary','holidays'].forEach(t=>{
+    document.getElementById('page-'+t).classList.toggle('hidden',t!==tab);
+    const btn=document.getElementById('tab-'+t);
+    if(btn)btn.classList.toggle('active',t===tab);
+  });
+  if(tab==='summary')renderSummary();
+}
+
+// ===================== EXPORT PDF =====================
+// ===================== EXCEL COLORS =====================
+const DOC_HEX=['ddd6fe','bfdbfe','a5f3fc','99f6e4','bbf7d0','d9f99d','fef08a','fed7aa','fbcfe8','fecdd3','c7d2fe','fde68a'];
+const SEC_HEX={'ในเวลา':'dbeafe','เช้า':'fef9c3','บ่าย':'dcfce7','นอกเวลา':'f3e8ff'};
+const getDocHex=id=>DOC_HEX[(id-1)%DOC_HEX.length];
+function xStyle(font,fill,align,border){
+  const s={};
+  if(font) s.font={name:'Sarabun',...font};
+  if(fill) s.fill={patternType:'solid',fgColor:{rgb:fill}};
+  if(align) s.alignment={vertical:'center',...align};
+  if(border){
+    const b={style:'thin',color:{rgb:'d1d5db'}};
+    s.border={top:b,bottom:b,left:b,right:b,...border};
+  }
+  return s;
+}
+function applyStyle(ws,r,c,style){
+  const addr=XLSX.utils.encode_cell({r,c});
+  if(!ws[addr]) ws[addr]={t:'s',v:''};
+  ws[addr].s=style;
+}
+
+async function exportExcel(){
+  const btn=document.getElementById('exportBtn');
+  btn.textContent='กำลัง Export...';btn.disabled=true;
+  try{
+    const{year,month}=state;
+    const days=getDaysInMonth(year,month);
+    const ncols=1+ALL_SLOT_DEFS.length;
+    const aoa=[];const styles={};const merges=[];
+    let ri=0;
+    const apS=(r,c,s)=>{const a=XLSX.utils.encode_cell({r,c});if(!aoa[r]||aoa[r][c]!==undefined){if(!styles[a])styles[a]={};Object.assign(styles[a],s);}};
+
+    // Row 0: Title
+    aoa.push([`ตารางแพทย์ เดือน${TH_MONTHS[month]} พ.ศ. ${year+543}`,...Array(ncols-1).fill('')]);
+    merges.push({s:{r:0,c:0},e:{r:0,c:ncols-1}});
+    styles[XLSX.utils.encode_cell({r:0,c:0})]=xStyle({sz:13,bold:true,color:{rgb:'ffffff'}},null,'4f46e5',{horizontal:'center'});
+    ri=1;
+
+    // Row 1: Section headers
+    const secRow=[''];
+    const secGroups=[];let lastSec='',curStart=1;
+    for(let i=0;i<ALL_SLOT_DEFS.length;i++){
+      const sec=ALL_SLOT_DEFS[i].section;
+      if(sec!==lastSec){
+        if(lastSec) secGroups[secGroups.length-1].end=i;
+        secGroups.push({name:sec,start:i+1,end:ALL_SLOT_DEFS.length});
+        lastSec=sec;
+      }
+      secRow.push(sec===secGroups[secGroups.length-1].name&&i===secGroups[secGroups.length-1].start-1?sec:'');
+    }
+    aoa.push(secRow);
+    styles[XLSX.utils.encode_cell({r:ri,c:0})]=xStyle({sz:9,bold:true},'e2e8f0',{horizontal:'center'},{});
+    for(const sg of secGroups){
+      const bg=SEC_HEX[sg.name]||'f1f5f9';
+      merges.push({s:{r:ri,c:sg.start},e:{r:ri,c:sg.end}});
+      for(let c=sg.start;c<=sg.end;c++)
+        styles[XLSX.utils.encode_cell({r:ri,c})]=xStyle({sz:9,bold:true},bg,{horizontal:'center'},{});
+    }
+    ri=2;
+
+    // Row 2: Slot labels
+    const slotRow=['วันที่'];
+    for(const sd of ALL_SLOT_DEFS) slotRow.push(sd.label+'\n'+sd.sub);
+    aoa.push(slotRow);
+    styles[XLSX.utils.encode_cell({r:ri,c:0})]=xStyle({sz:9,bold:true},'e2e8f0',{horizontal:'center',wrapText:true},{});
+    for(let i=0;i<ALL_SLOT_DEFS.length;i++){
+      const bg=SEC_HEX[ALL_SLOT_DEFS[i].section]||'f1f5f9';
+      styles[XLSX.utils.encode_cell({r:ri,c:i+1})]=xStyle({sz:8,bold:true},bg,{horizontal:'center',vertical:'center',wrapText:true},{});
+    }
+    ri=3;
+
+    // Day rows
+    for(const ds of days){
+      const d=parseDate(ds);const dow=d.getDay();
+      const isOff=isWeekend(ds)||isHoliday(ds);
+      const holName=state.holidays[ds]||'';
+      const sched=state.schedule[ds]||{};
+      const rowBg=isOff?'fca5a5':null;
+
+      let dateLabel=`${d.getDate()} ${TH_DAYS[dow]}`;
+      if(holName) dateLabel+='\n'+holName.substring(0,16);
+      const dataRow=[dateLabel];
+      for(const sd of ALL_SLOT_DEFS){
+        const app=isSlotApplicable(sd.key,dow,isOff);
+        if(!app){dataRow.push('—');continue;}
+        const doc=sched[sd.key]?getDoctorById(sched[sd.key]):null;
+        dataRow.push(doc?doc.name:'');
+      }
+      aoa.push(dataRow);
+
+      // Date cell style
+      styles[XLSX.utils.encode_cell({r:ri,c:0})]=xStyle(
+        {sz:9,bold:true,color:{rgb:isOff?'7f1d1d':'1f2937'}},
+        rowBg||'f9fafb',{horizontal:'left',wrapText:true},{right:{style:'medium',color:{rgb:'94a3b8'}},top:{style:'thin',color:{rgb:'d1d5db'}},bottom:{style:'thin',color:{rgb:'d1d5db'}},left:{style:'thin',color:{rgb:'d1d5db'}}}
+      );
+      // Slot cell styles
+      for(let i=0;i<ALL_SLOT_DEFS.length;i++){
+        const sd=ALL_SLOT_DEFS[i];
+        const app=isSlotApplicable(sd.key,dow,isOff);
+        const docId=app?sched[sd.key]:null;
+        const doc=docId?getDoctorById(docId):null;
+        let bg=rowBg||(app?'ffffff':'f3f4f6');
+        if(doc&&!isOff) bg=getDocHex(doc.id);
+        if(doc&&isOff) bg='f87171';
+        styles[XLSX.utils.encode_cell({r:ri,c:i+1})]=xStyle(
+          {sz:8,bold:!!doc,color:{rgb:isOff?'7f1d1d':'1f2937'}},bg,
+          {horizontal:'center'},{}
+        );
+      }
+      ri++;
+
+      // Leave sub-row
+      if(isWorkday(ds)){
+        const lvs=Object.entries(state.leaves[ds]||{});
+        if(lvs.length){
+          const txt=lvs.map(([did,lt])=>{const d2=getDoctorById(parseInt(did));return d2?`${d2.name}: ${LEAVE_LABELS[lt]||lt}`:'';}).filter(Boolean).join('   |   ');
+          aoa.push([txt,...Array(ncols-1).fill('')]);
+          merges.push({s:{r:ri,c:0},e:{r:ri,c:ncols-1}});
+          styles[XLSX.utils.encode_cell({r:ri,c:0})]=xStyle({sz:8,italic:true,color:{rgb:'92400e'}},'fef3c7',{horizontal:'left',wrapText:true},{bottom:{style:'thin',color:{rgb:'fbbf24'}},top:{style:'thin',color:{rgb:'fbbf24'}},left:{style:'thin',color:{rgb:'fbbf24'}},right:{style:'thin',color:{rgb:'fbbf24'}}});
+          ri++;
+        }
+      }
+    }
+
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!merges']=merges;
+    for(const[addr,s] of Object.entries(styles)){if(!ws[addr])ws[addr]={t:'s',v:''};ws[addr].s=s;}
+    ws['!cols']=[{wch:11},...ALL_SLOT_DEFS.map(()=>({wch:10}))];
+    ws['!rows']=[{hpt:22},{hpt:15},{hpt:26}];
+    ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:ri-1,c:ncols-1}});
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,`${TH_MONTHS[month]} ${year+543}`);
+    XLSX.writeFile(wb,`ตารางแพทย์_${TH_MONTHS[month]}_${year+543}.xlsx`);
+  }catch(e){alert('Export ไม่สำเร็จ: '+e.message);console.error(e);}
+  btn.textContent='📊 Export Excel';btn.disabled=false;
+}
+
+function exportLeaveExcel(){
+  try{
+    const{year,month}=state;
+    const days=getDaysInMonth(year,month);
+    const aoa=[[`รายการวันลา เดือน${TH_MONTHS[month]} พ.ศ. ${year+543}`,'','',''],
+      ['วันที่','วันในสัปดาห์','แพทย์','ประเภทการลา']];
+    const styles={};
+    const merges=[{s:{r:0,c:0},e:{r:0,c:3}}];
+    styles['A1']=xStyle({sz:12,bold:true,color:{rgb:'ffffff'}},'4f46e5',{horizontal:'center'},{});
+    ['A','B','C','D'].forEach(col=>{ styles[col+'2']=xStyle({sz:9,bold:true},'e0e7ff',{horizontal:'center'},{bottom:{style:'medium',color:{rgb:'4f46e5'}},top:{style:'thin',color:{rgb:'d1d5db'}},left:{style:'thin',color:{rgb:'d1d5db'}},right:{style:'thin',color:{rgb:'d1d5db'}}});});
+    let ri=2;
+    for(const ds of days){
+      const d=parseDate(ds);
+      const lvs=Object.entries(state.leaves[ds]||{});
+      for(const[did,lt] of lvs){
+        const doc=getDoctorById(parseInt(did));if(!doc)continue;
+        aoa.push([`${d.getDate()} ${TH_MS[d.getMonth()+1]} ${d.getFullYear()+543}`,TH_DAYS_FULL[d.getDay()],doc.name,LEAVE_LABELS[lt]||lt]);
+        const bg=getDocHex(doc.id);
+        const bdr={top:{style:'hair',color:{rgb:'e5e7eb'}},bottom:{style:'hair',color:{rgb:'e5e7eb'}},left:{style:'thin',color:{rgb:'d1d5db'}},right:{style:'thin',color:{rgb:'d1d5db'}}};
+        styles['A'+(ri+1)]=xStyle({sz:9},'ffffff',{horizontal:'center'},bdr);
+        styles['B'+(ri+1)]=xStyle({sz:9},'ffffff',{horizontal:'center'},bdr);
+        styles['C'+(ri+1)]=xStyle({sz:9,bold:true},bg,{horizontal:'center'},bdr);
+        styles['D'+(ri+1)]=xStyle({sz:9},'ffffff',{horizontal:'left'},bdr);
+        ri++;
+      }
+    }
+    const ws=XLSX.utils.aoa_to_sheet(aoa);
+    ws['!merges']=merges;
+    for(const[addr,s] of Object.entries(styles)){if(!ws[addr])ws[addr]={t:'s',v:''};ws[addr].s=s;}
+    ws['!cols']=[{wch:15},{wch:12},{wch:14},{wch:22}];
+    ws['!ref']=XLSX.utils.encode_range({s:{r:0,c:0},e:{r:ri,c:3}});
+    const wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,`วันลา ${TH_MONTHS[month]}`);
+    XLSX.writeFile(wb,`วันลาแพทย์_${TH_MONTHS[month]}_${year+543}.xlsx`);
+  }catch(e){alert('Export ไม่สำเร็จ: '+e.message);console.error(e);}
+}
+
+// ===================== INIT =====================
+document.getElementById('selMonth').addEventListener('change',function(){
+  state.month=parseInt(this.value);
+  saveState();
+  initPickers();renderSchedule();renderSummary();renderLeaveList();renderConstraintList();renderOncallCalendar();
+});
+document.getElementById('selYear').addEventListener('change',function(){
+  state.year=parseInt(this.value);
+  saveState();
+  initPickers();renderSchedule();renderSummary();renderLeaveList();renderConstraintList();renderOncallCalendar();
+});
+
+(function init(){
+  loadState();
+  document.getElementById('selMonth').value=state.month;
+  document.getElementById('selYear').value=state.year;
+  initPickers();
+  renderDoctorLists();
+  renderLeaveDropdown();
+  renderConstraintDropdown();
+  renderSchedule();
+  renderSummary();
+  renderLeaveList();
+  renderConstraintList();
+  renderHolidayList();
+  initFirebaseCloud();
+})();
+</script>
+</body>
+</html>
